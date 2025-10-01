@@ -1,0 +1,19 @@
+# Environment files
+.env
+.env.example
+
+# Node modules
+node_modules/
+
+# Build output
+/dist/
+tsconfig.tsbuildinfo
+
+# Logs
+*.log
+
+# Dependency lock (optional, if you don't want to track)
+# package-lock.json
+
+# Misc
+.DS_Store
