@@ -1,14 +1,19 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Send, Sparkles, Gift, FileText, Users } from 'lucide-react';
+import { Send, Sparkles, Gift, FileText, Users, Zap, Brain } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+export type AIProvider = 'nvidia' | 'claude';
 
 export function Home() {
   const navigate = useNavigate();
   const [prompt, setMessage] = useState('');
+  const [provider, setProvider] = useState<AIProvider>('nvidia');
   
   const handleGenerate = () => {
     if (prompt.trim()) {
-      navigate('/workspace', { state: { initialPrompt: prompt } });
+      console.log('Navigating to workspace with provider:', provider);
+      navigate('/workspace', { state: { initialPrompt: prompt, provider } });
     }
   };
 
@@ -104,6 +109,29 @@ export function Home() {
                     <span className="w-2 h-2 bg-green-500 rounded-full"></span>
                     Supabase
                   </button>
+                  
+                  {/* AI Provider Dropdown */}
+                  <Select value={provider} onValueChange={(value) => setProvider(value as AIProvider)}>
+                    <SelectTrigger className="w-[180px] bg-gray-800/50 border-gray-700/50 text-white/90 text-sm">
+                      <SelectValue placeholder="Select AI Provider" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-gray-800 border-gray-700">
+                      <SelectItem value="nvidia" className="text-white/90 focus:bg-green-600/20 focus:text-white">
+                        <div className="flex items-center gap-2">
+                          <Zap className="w-4 h-4 text-green-500" />
+                          <span>NVIDIA API</span>
+                          <span className="text-xs bg-green-500/20 px-1.5 py-0.5 rounded ml-1">Free</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="claude" className="text-white/90 focus:bg-purple-600/20 focus:text-white">
+                        <div className="flex items-center gap-2">
+                          <Brain className="w-4 h-4 text-purple-500" />
+                          <span>Claude API</span>
+                          <span className="text-xs bg-purple-500/20 px-1.5 py-0.5 rounded ml-1">Pro</span>
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 
                 <div className="flex items-center gap-2">

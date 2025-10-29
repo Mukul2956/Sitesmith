@@ -1,16 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, CheckCircle, Circle, Clock } from 'lucide-react';
+import { Send, Bot, CheckCircle, Circle, Clock, Zap, Brain } from 'lucide-react';
 import { Step } from '@/types';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
+export type AIProvider = 'nvidia' | 'claude';
 
 interface ChatPanelProps {
   step: Step[];
   currentStep: number;
   onStepClick: (stepId: number) => void;
   onNewMessage: (message: string) => void;
+  provider: AIProvider;
+  onProviderChange: (provider: AIProvider) => void;
 }
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ step, currentStep, onStepClick, onNewMessage }) => {
+const ChatPanel: React.FC<ChatPanelProps> = ({ step, currentStep, onStepClick, onNewMessage, provider, onProviderChange }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -77,9 +81,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ step, currentStep, onStepClick, o
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {step.map((stepItem, index) => {
           const stepId = stepItem.id ?? index + 1; // Use step.id or fallback to index+1
+          // Use a combination of id and index for guaranteed uniqueness
+          const uniqueKey = `step-${stepItem.id}-${index}`;
           return (
             <div
-              key={stepItem.id || index}
+              key={uniqueKey}
               className={`p-3 rounded-lg cursor-pointer transition-colors ${
                 currentStep === stepId
                   ? 'bg-primary/20 border border-primary/30'
@@ -103,7 +109,33 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ step, currentStep, onStepClick, o
       </div>
 
       {/* Input */}
-      <div className="p-4 border-t border-glass-border/20">
+      <div className="p-4 border-t border-glass-border/20 space-y-3">
+        {/* AI Provider Dropdown */}
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">AI Provider:</span>
+          <Select value={provider} onValueChange={(value) => onProviderChange(value as AIProvider)}>
+            <SelectTrigger className="flex-1 h-8 text-xs bg-glass/30 border-glass-border/30">
+              <SelectValue placeholder="Select AI Provider" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="nvidia">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-3 h-3 text-green-500" />
+                  <span>NVIDIA API</span>
+                  <span className="text-[10px] bg-green-500/20 px-1 py-0.5 rounded ml-1">Free</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="claude">
+                <div className="flex items-center gap-2">
+                  <Brain className="w-3 h-3 text-purple-500" />
+                  <span>Claude API</span>
+                  <span className="text-[10px] bg-purple-500/20 px-1 py-0.5 rounded ml-1">Pro</span>
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        
         <div className="flex gap-2">
           <input
             type="text"

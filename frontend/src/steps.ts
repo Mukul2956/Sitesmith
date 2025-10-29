@@ -29,20 +29,28 @@ import { Step, StepType } from './types';
  * The input can have strings in the middle they need to be ignored
  */
 export function parseXml(response: string): Step[] {
+    console.log('=== parseXml called ===');
+    console.log('Response length:', response.length);
+    
     // Extract the XML content between <boltArtifact> tags
     const xmlMatch = response.match(/<boltArtifact[^>]*>([\s\S]*?)<\/boltArtifact>/);
     
     if (!xmlMatch) {
+      console.log('No boltArtifact tags found in response');
+      console.log('Response preview:', response.substring(0, 200));
       return [];
     }
   
     const xmlContent = xmlMatch[1];
+    console.log('Found boltArtifact, content length:', xmlContent.length);
+    
     const steps: Step[] = [];
     let stepId = 1;
   
     // Extract artifact title
     const titleMatch = response.match(/title="([^"]*)"/);
     const artifactTitle = titleMatch ? titleMatch[1] : 'Project Files';
+    console.log('Artifact title:', artifactTitle);
   
     // Add initial artifact step
     steps.push({
@@ -57,8 +65,11 @@ export function parseXml(response: string): Step[] {
     const actionRegex = /<boltAction\s+type="([^"]*)"(?:\s+filePath="([^"]*)")?>([\s\S]*?)<\/boltAction>/g;
     
     let match;
+    let actionCount = 0;
     while ((match = actionRegex.exec(xmlContent)) !== null) {
+      actionCount++;
       const [, type, filePath, content] = match;
+      console.log(`Action ${actionCount}: type="${type}", filePath="${filePath || 'N/A'}", contentLength=${content.length}`);
   
       if (type === 'file') {
         // File creation step
@@ -69,8 +80,9 @@ export function parseXml(response: string): Step[] {
           type: StepType.CreateFile,
           status: 'pending',
           code: content.trim(),
-          path:filePath
+          path: filePath
         });
+        console.log(`  → Added file creation step for: ${filePath}`);
       } else if (type === 'shell') {
         // Shell command step
         steps.push({
@@ -81,8 +93,13 @@ export function parseXml(response: string): Step[] {
           status: 'pending',
           code: content.trim()
         });
+        console.log(`  → Added shell command step`);
       }
     }
+    
+    console.log(`Total actions found: ${actionCount}`);
+    console.log(`Total steps created: ${steps.length}`);
+    console.log('=== parseXml complete ===');
   
     return steps;
   }
