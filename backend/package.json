@@ -17,10 +17,13 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
+    "mongoose": "^8.19.2",
     "openai": "^6.7.0",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@types/node": "^24.5.2"
+    "@types/node": "^24.5.2",
+    "@types/uuid": "^10.0.0"
   }
 }

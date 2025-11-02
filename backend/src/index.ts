@@ -8,28 +8,98 @@ import { getSystemPrompt, BASE_PROMPT, SIMPLE_SYSTEM_PROMPT } from "./prompts.js
 import type { TextBlock } from "@anthropic-ai/sdk/resources";
 import { basePrompt as nodebasePrompt } from "./default/node.js";
 import { basePrompt as reactbasePrompt } from "./default/react.js";
+import { connectDatabase } from "./config/database.js";
+import projectRoutes from "./routes/projects.js";
 
 dotenv.config();
+
+// Function to combine React and Node templates for fullstack projects
+function combineTemplates(reactTemplate: string, nodeTemplate: string): string {
+    // Extract the React template content
+    const reactContent = reactTemplate.replace('<boltArtifact id="project-import" title="Project Files">', '')
+                                    .replace('</boltArtifact>', '');
+    
+    // Extract the Node template content  
+    const nodeContent = nodeTemplate.replace('<boltArtifact id="project-import" title="Project Files">', '')
+                                  .replace('</boltArtifact>', '');
+    
+    // Combine both templates with proper structure for fullstack
+    return `<boltArtifact id="project-import" title="Project Files">
+${reactContent}
+${nodeContent}
+
+<boltAction type="file" filePath="README.md"># Fullstack Application
+
+This is a fullstack application with React frontend and Node.js backend.
+
+## Project Structure
+
+\`\`\`
+├── frontend/          # React + TypeScript + Vite
+├── backend/           # Node.js + Express
+└── README.md
+\`\`\`
+
+## Getting Started
+
+### Backend Setup
+\`\`\`bash
+cd backend
+npm install
+npm run dev
+\`\`\`
+
+### Frontend Setup  
+\`\`\`bash
+cd frontend
+npm install
+npm run dev
+\`\`\`
+
+## Features
+
+- **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS
+- **Backend**: Node.js + Express + CORS
+- **Communication**: API integration between frontend and backend
+- **Hot Reload**: Both frontend and backend support hot reloading
+
+## Development
+
+The frontend and backend can be developed independently and integrated via API calls.
+</boltAction>
+
+</boltArtifact>`;
+}
 
 
 
 const app = express();
 
 // Initialize AI clients
-const anthropic = new Anthropic();
+const anthropic = new Anthropic({
+  timeout: 600000, // 10 minutes timeout
+  maxRetries: 3
+});
 const openai = new OpenAI({
   apiKey: process.env.NVIDIA_API_KEY,
   baseURL: 'https://integrate.api.nvidia.com/v1',
-  timeout: 60000, // 60 seconds timeout
-  maxRetries: 2, // Retry failed requests up to 2 times
+  timeout: 600000, // 10 minutes timeout (increased from 60 seconds)
+  maxRetries: 3, // Increased retry attempts
 });
 
 // AI Provider: 'nvidia' (default, free) or 'claude' (premium)
 const AI_PROVIDER = process.env.AI_PROVIDER || 'nvidia';
 
+// Connect to MongoDB
+connectDatabase();
 
 app.use(cors());
-app.use(express.json());
+// Increase body parser limits for large conversation histories and projects
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Routes
+app.use('/api/projects', projectRoutes);
 
 // Decide between node or react template
 app.post("/template", async (req, res) => {
@@ -52,7 +122,7 @@ app.post("/template", async (req, res) => {
                 model: "claude-sonnet-4-5",
                 max_tokens: 200,
                 system:
-                    "Return either node or react based on what do you think this project should be. Only return a single word either 'node' or 'react'. Do not return anything extra",
+                    "Analyze the project requirements and return one of these options: 'react' (frontend only), 'node' (backend/API only), or 'fullstack' (both frontend and backend). Consider if the project needs both a user interface AND an API/backend. Only return a single word: 'react', 'node', or 'fullstack'. Do not return anything extra",
             });
             answer = (response.content[0] as TextBlock).text.trim().toLowerCase();
         } else {
@@ -63,7 +133,7 @@ app.post("/template", async (req, res) => {
                         {
                             role: "system",
                             content:
-                                "Return either node or react based on what do you think this project should be. Only return a single word either 'node' or 'react'. Do not return anything extra",
+                                "Analyze the project requirements and return one of these options: 'react' (frontend only), 'node' (backend/API only), or 'fullstack' (both frontend and backend). Consider if the project needs both a user interface AND an API/backend. Only return a single word: 'react', 'node', or 'fullstack'. Do not return anything extra",
                         },
                         { role: "user", content: prompt },
                     ],
@@ -73,22 +143,54 @@ app.post("/template", async (req, res) => {
                 });
                 answer = (response.choices[0]?.message?.content || "react").trim().toLowerCase();
             } catch (nvidiaError) {
-                answer = "react";
+                // Smart fallback based on prompt content
+                const promptLower = prompt.toLowerCase();
+                
+                // Check for fullstack indicators
+                const hasBackendKeywords = promptLower.includes('api') || promptLower.includes('backend') || 
+                                         promptLower.includes('server') || promptLower.includes('database') || 
+                                         promptLower.includes('auth') || promptLower.includes('login') ||
+                                         promptLower.includes('express') || promptLower.includes('node');
+                
+                const hasFrontendKeywords = promptLower.includes('frontend') || promptLower.includes('ui') || 
+                                          promptLower.includes('interface') || promptLower.includes('website') || 
+                                          promptLower.includes('app') || promptLower.includes('react') ||
+                                          promptLower.includes('component') || promptLower.includes('page');
+                
+                const hasFullstackKeywords = promptLower.includes('fullstack') || promptLower.includes('full stack') ||
+                                           promptLower.includes('full-stack') || promptLower.includes('web app') ||
+                                           promptLower.includes('web application');
+                
+                if (hasFullstackKeywords || (hasBackendKeywords && hasFrontendKeywords)) {
+                    answer = "fullstack";
+                } else if (hasBackendKeywords) {
+                    answer = "node";
+                } else {
+                    answer = "react";
+                }
             }
         }
 
         // 2. Prepare template prompts only (no chat logic)
-        if (answer.includes("react")) {
+        if (answer.includes("react") && !answer.includes("fullstack")) {
             templatePrompts = [
                 BASE_PROMPT,
                 `Here is an artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${reactbasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
             ];
             uiPrompts = [reactbasePrompt];
-        } else if (answer.includes("node")) {
+        } else if (answer.includes("node") && !answer.includes("fullstack")) {
             templatePrompts = [
                 `Here is an artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${nodebasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
             ];
             uiPrompts = [nodebasePrompt];
+        } else if (answer.includes("fullstack")) {
+            // Automatically combine React and Node templates for fullstack projects
+            const combinedPrompt = reactbasePrompt + '\n\n' + nodebasePrompt;
+            templatePrompts = [
+                BASE_PROMPT,
+                `Here is an artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${combinedPrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n  - */package-lock.json\n  - */node_modules/\n`,
+            ];
+            uiPrompts = [combinedPrompt];
         } else {
             // Default to react if unclear
             templatePrompts = [
@@ -124,18 +226,36 @@ app.post("/chat", async (req, res) => {
     console.log("Messages:", JSON.stringify(messages, null, 2));
     console.log("Streaming:", useStreaming);
 
-    // --- Inject react/node base prompt for NVIDIA ---
+    // --- Inject react/node/fullstack base prompt for NVIDIA ---
     if (provider === "nvidia") {
-        // Try to infer project type from the latest user message or fallback to react
-        let projectType = "react";
-    const lastUserMsg = messages.slice().reverse().find((m: any) => m.role === "user");
-        if (lastUserMsg && /node(\b|js|\.js)/i.test(lastUserMsg.content)) {
+        // Try to infer project type from the latest user message or existing conversation
+        let projectType = "react"; // default
+        const conversationText = messages.map((m: any) => m.content).join(" ").toLowerCase();
+        
+        // Enhanced project type detection
+        if (conversationText.includes("fullstack") || 
+            (conversationText.includes("backend") && conversationText.includes("frontend")) ||
+            (conversationText.includes("api") && conversationText.includes("react")) ||
+            (conversationText.includes("server") && conversationText.includes("client"))) {
+            projectType = "fullstack";
+        } else if (conversationText.includes("node") || conversationText.includes("backend") || 
+                   conversationText.includes("api") || conversationText.includes("server")) {
             projectType = "node";
         }
+        
         // Import base prompts
         const { basePrompt: reactbasePrompt } = await import("./default/react.js");
         const { basePrompt: nodebasePrompt } = await import("./default/node.js");
-        const basePrompt = projectType === "node" ? nodebasePrompt : reactbasePrompt;
+        
+        let basePrompt;
+        if (projectType === "fullstack") {
+            // Combine React and Node templates for fullstack projects
+            basePrompt = combineTemplates(reactbasePrompt, nodebasePrompt);
+        } else if (projectType === "node") {
+            basePrompt = nodebasePrompt;
+        } else {
+            basePrompt = reactbasePrompt;
+        }
         // Prepend as a system message
         messages = [
             { role: "system", content: basePrompt },
@@ -148,7 +268,7 @@ app.post("/chat", async (req, res) => {
             const response = await anthropic.messages.create({
                 messages,
                 model: "claude-sonnet-4-5",
-                max_tokens: 8000,
+                max_tokens: 16384, // Increased from 8000 to 16384 tokens for larger projects
                 system: getSystemPrompt(),
             });
             const responseText = (response.content[0] as TextBlock)?.text;
@@ -163,13 +283,102 @@ app.post("/chat", async (req, res) => {
                 })),
             ];
             try {
-                if (useStreaming) {
+                if (useStreaming && req.body.realTimeStream) {
+                    // Improved real-time streaming response with proper error handling
+                    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+                    res.setHeader('Transfer-Encoding', 'chunked');
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+                    res.setHeader('Cache-Control', 'no-cache');
+                    res.setHeader('Connection', 'keep-alive');
+
+                    let hasResponded = false;
+                    let lastChunkTime = Date.now();
+                    
+                    // Heartbeat mechanism to prevent connection drops
+                    const heartbeatInterval = setInterval(() => {
+                        const now = Date.now();
+                        if (now - lastChunkTime > 30000 && !res.destroyed) { // 30 seconds
+                            try {
+                                res.write('\n'); // Send newline as heartbeat
+                                lastChunkTime = now;
+                            } catch (heartbeatError) {
+                                console.error('Heartbeat error:', heartbeatError);
+                                clearInterval(heartbeatInterval);
+                            }
+                        }
+                    }, 10000); // Check every 10 seconds
+
+                    try {
+                        const completion = await openai.chat.completions.create({
+                            model: "qwen/qwen3-coder-480b-a35b-instruct",
+                            messages: formattedMessages,
+                            temperature: 0.7,
+                            top_p: 0.8,
+                            max_tokens: 64000, // Increased to 64K for larger projects with multiple components
+                            stream: true
+                        });
+
+                        let totalChunks = 0;
+                        let totalChars = 0;
+                        
+                        for await (const chunk of completion) {
+                            if (res.destroyed) {
+                                console.log('❌ Client disconnected, stopping stream');
+                                console.log(`  - Streamed ${totalChunks} chunks, ${totalChars} characters before disconnect`);
+                                break;
+                            }
+                            
+                            const delta = chunk.choices[0]?.delta;
+                            if (delta?.content) {
+                                try {
+                                    res.write(delta.content);
+                                    hasResponded = true;
+                                    lastChunkTime = Date.now();
+                                    totalChunks++;
+                                    totalChars += delta.content.length;
+                                } catch (writeError) {
+                                    console.error('❌ Error writing chunk:', writeError);
+                                    break;
+                                }
+                            }
+                            
+                            // Check for finish_reason
+                            if (chunk.choices[0]?.finish_reason) {
+                                console.log('🏁 Stream finished with reason:', chunk.choices[0].finish_reason);
+                                if (chunk.choices[0].finish_reason === 'length') {
+                                    console.log('⚠️ WARNING: Response was truncated due to max_tokens limit!');
+                                }
+                            }
+                        }
+                        
+                        console.log('✅ Streaming completed');
+                        console.log(`  - Total chunks: ${totalChunks}`);
+                        console.log(`  - Total characters: ${totalChars}`);
+                        
+                        clearInterval(heartbeatInterval);
+                        
+                        if (!res.destroyed) {
+                            res.end();
+                        }
+                    } catch (streamError) {
+                        clearInterval(heartbeatInterval);
+                        console.error('Streaming error:', streamError);
+                        if (!hasResponded && !res.destroyed) {
+                            res.status(500).json({ 
+                                error: 'Streaming failed', 
+                                message: streamError instanceof Error ? streamError.message : 'Unknown streaming error'
+                            });
+                        }
+                    }
+                } else if (useStreaming) {
+                    // Collect full response before sending (current behavior)
                     const completion = await openai.chat.completions.create({
                         model: "qwen/qwen3-coder-480b-a35b-instruct",
                         messages: formattedMessages,
                         temperature: 0.7,
                         top_p: 0.8,
-                        max_tokens: 4096,
+                        max_tokens: 64000, // Increased to 64K for larger projects
                         stream: true
                     });
                     let fullResponse = "";
@@ -186,7 +395,7 @@ app.post("/chat", async (req, res) => {
                         messages: formattedMessages,
                         temperature: 0.7,
                         top_p: 0.8,
-                        max_tokens: 10000
+                        max_tokens: 64000 // Increased to 64K for larger projects
                     });
                     const responseContent = response.choices[0]?.message?.content || "";
                     res.json({ response: responseContent });
@@ -240,7 +449,13 @@ app.post("/chat", async (req, res) => {
 //         res.status(500).json({ message: "Error processing chat request", error: errorMessage });
 //     }
 // });
-app.listen(3000);
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+    console.log(`🚀 Backend server running on port ${PORT}`);
+    console.log(`📍 Server URL: http://localhost:${PORT}`);
+    console.log(`🔗 CORS enabled for all origins`);
+    console.log(`🤖 AI Provider: ${AI_PROVIDER}`);
+});
 
 // async function main(){
 //     anthropic.messages.stream({
