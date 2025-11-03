@@ -101,113 +101,112 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Routes
 app.use('/api/projects', projectRoutes);
 
-// Decide between node or react template
+// Simple template endpoint
 app.post("/template", async (req, res) => {
     const prompt = req.body.prompt;
     const provider = req.body.provider || AI_PROVIDER;
+    
     try {
-        let answer: string;
-        let templatePrompts: string[] = [];
-        let uiPrompts: string[] = [];
-    // let chatResponse: string | null = null;
-    // let basePrompt = BASE_PROMPT;
-    // let systemPrompt = "";
-    // let userPrompt = "";
-    // let chatMessages: any[] = [];
+        console.log(`🎯 Template request for "${prompt}" using ${provider}`);
+        
+        // Step 1: Ask AI to classify the project type
+        let projectType: string;
+        
+        const classificationPrompt = `Analyze this request and classify it as exactly one word:
 
-        // 1. Decide template type
+- 'react' - Frontend-only apps (todo lists, dashboards, calculators, portfolios, landing pages, etc.)
+- 'node' - Backend-only apps (APIs, servers, CLI tools, etc.) 
+- 'fullstack' - Apps that explicitly need both frontend AND backend (user authentication, databases, real-time chat, etc.)
+
+For simple apps like "todo", "calculator", "dashboard" - choose 'react'.
+Only choose 'fullstack' if the user explicitly mentions needing backend/API/database.
+
+Return exactly one word: react, node, or fullstack.`;
+
         if (provider === "claude") {
             const response = await anthropic.messages.create({
                 messages: [{ role: "user", content: prompt }],
                 model: "claude-sonnet-4-5",
                 max_tokens: 200,
-                system:
-                    "Analyze the project requirements and return one of these options: 'react' (frontend only), 'node' (backend/API only), or 'fullstack' (both frontend and backend). Consider if the project needs both a user interface AND an API/backend. Only return a single word: 'react', 'node', or 'fullstack'. Do not return anything extra",
+                system: classificationPrompt,
             });
-            answer = (response.content[0] as TextBlock).text.trim().toLowerCase();
+            projectType = (response.content[0] as TextBlock).text.trim().toLowerCase();
         } else {
-            try {
-                const response = await openai.chat.completions.create({
-                    model: "qwen/qwen3-coder-480b-a35b-instruct",
-                    messages: [
-                        {
-                            role: "system",
-                            content:
-                                "Analyze the project requirements and return one of these options: 'react' (frontend only), 'node' (backend/API only), or 'fullstack' (both frontend and backend). Consider if the project needs both a user interface AND an API/backend. Only return a single word: 'react', 'node', or 'fullstack'. Do not return anything extra",
-                        },
-                        { role: "user", content: prompt },
-                    ],
-                    temperature: 0.7,
-                    top_p: 0.8,
-                    max_tokens: 200,
-                });
-                answer = (response.choices[0]?.message?.content || "react").trim().toLowerCase();
-            } catch (nvidiaError) {
-                // Smart fallback based on prompt content
-                const promptLower = prompt.toLowerCase();
-                
-                // Check for fullstack indicators
-                const hasBackendKeywords = promptLower.includes('api') || promptLower.includes('backend') || 
-                                         promptLower.includes('server') || promptLower.includes('database') || 
-                                         promptLower.includes('auth') || promptLower.includes('login') ||
-                                         promptLower.includes('express') || promptLower.includes('node');
-                
-                const hasFrontendKeywords = promptLower.includes('frontend') || promptLower.includes('ui') || 
-                                          promptLower.includes('interface') || promptLower.includes('website') || 
-                                          promptLower.includes('app') || promptLower.includes('react') ||
-                                          promptLower.includes('component') || promptLower.includes('page');
-                
-                const hasFullstackKeywords = promptLower.includes('fullstack') || promptLower.includes('full stack') ||
-                                           promptLower.includes('full-stack') || promptLower.includes('web app') ||
-                                           promptLower.includes('web application');
-                
-                if (hasFullstackKeywords || (hasBackendKeywords && hasFrontendKeywords)) {
-                    answer = "fullstack";
-                } else if (hasBackendKeywords) {
-                    answer = "node";
-                } else {
-                    answer = "react";
-                }
-            }
+            const response = await openai.chat.completions.create({
+                model: "qwen/qwen3-coder-480b-a35b-instruct",
+                messages: [
+                    {
+                        role: "system",
+                        content: classificationPrompt,
+                    },
+                    { role: "user", content: prompt },
+                ],
+                temperature: 0.1,
+                max_tokens: 200,
+            });
+            projectType = (response.choices[0]?.message?.content || "react").trim().toLowerCase();
         }
-
-        // 2. Prepare template prompts only (no chat logic)
-        if (answer.includes("react") && !answer.includes("fullstack")) {
-            templatePrompts = [
-                BASE_PROMPT,
-                `Here is an artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${reactbasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
-            ];
+        
+        // Simple fallback for common frontend-only apps
+        const frontendKeywords = ['todo', 'calculator', 'dashboard', 'portfolio', 'landing', 'homepage', 'website', 'ui', 'component'];
+        const lowerPrompt = prompt.toLowerCase();
+        if (frontendKeywords.some(keyword => lowerPrompt.includes(keyword)) && !lowerPrompt.includes('api') && !lowerPrompt.includes('backend') && !lowerPrompt.includes('database')) {
+            projectType = 'react';
+            console.log(`🔧 Override: Simple "${prompt}" app -> React`);
+        }
+        
+        console.log(`🎯 Final project type: ${projectType}`);
+        
+        // Step 2: Generate appropriate templates based on project type
+        let uiPrompts: string[] = [];
+        
+        if (projectType === "react") {
+            // Load React template
             uiPrompts = [reactbasePrompt];
-        } else if (answer.includes("node") && !answer.includes("fullstack")) {
-            templatePrompts = [
-                `Here is an artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${nodebasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
-            ];
+        } else if (projectType === "node") {
+            // Load Node template
             uiPrompts = [nodebasePrompt];
-        } else if (answer.includes("fullstack")) {
-            // Automatically combine React and Node templates for fullstack projects
-            const combinedPrompt = reactbasePrompt + '\n\n' + nodebasePrompt;
-            templatePrompts = [
-                BASE_PROMPT,
-                `Here is an artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${combinedPrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n  - */package-lock.json\n  - */node_modules/\n`,
-            ];
+        } else if (projectType === "fullstack") {
+            // Generate two folders: frontend and backend
+            // Load React base prompt inside frontend folder
+            const frontendPrompt = reactbasePrompt.replace(
+                /filePath="([^"]+)"/g,
+                'filePath="frontend/$1"'
+            );
+            
+            // Load Node base prompt inside backend folder  
+            const backendPrompt = nodebasePrompt.replace(
+                /filePath="([^"]+)"/g,
+                'filePath="backend/$1"'
+            );
+            
+            // Combine both prompts
+            const combinedPrompt = frontendPrompt.replace(
+                '</boltArtifact>',
+                ''
+            ) + backendPrompt.replace(
+                '<boltArtifact id="project-import" title="Project Files">',
+                ''
+            );
+            
             uiPrompts = [combinedPrompt];
         } else {
-            // Default to react if unclear
-            templatePrompts = [
-                BASE_PROMPT,
-                `Here is an artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${reactbasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
-            ];
+            // Default to React
+            console.log(`⚠️ Unknown project type "${projectType}", defaulting to React`);
             uiPrompts = [reactbasePrompt];
         }
-
-        // 3. Return only template result (no chat)
+        
+        console.log(`✅ Template generated for ${projectType}`);
+        
         res.json({
-            prompts: templatePrompts,
+            prompts: [],
             uiprompts: uiPrompts,
         });
+        
     } catch (error) {
+        console.error('❌ Template endpoint error:', error);
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
-        res.status(500).json({ message: "Error processing request", error: errorMessage });
+        res.status(500).json({ message: "Error processing template request", error: errorMessage });
     }
 });
 
@@ -449,6 +448,108 @@ app.post("/chat", async (req, res) => {
 //         res.status(500).json({ message: "Error processing chat request", error: errorMessage });
 //     }
 // });
+
+// Error feedback endpoint - sends compilation errors to AI for fixing
+app.post("/error", async (req, res) => {
+    const { 
+        errorMessage, 
+        errorFile, 
+        errorLine, 
+        errorColumn, 
+        projectContext, 
+        projectFiles, 
+        provider: requestProvider 
+    } = req.body;
+    
+    const provider = requestProvider || AI_PROVIDER;
+    
+    try {
+        console.log(`🚨 Error feedback request using ${provider}`);
+        console.log(`📁 Error in file: ${errorFile}`);
+        console.log(`🔍 Error message: ${errorMessage}`);
+        console.log(`📍 Location: line ${errorLine}, column ${errorColumn}`);
+        
+        // Create comprehensive error context prompt
+        const errorPrompt = `You are an expert developer helping fix a compilation error. Here's the context:
+
+## Project Context
+${projectContext}
+
+## Error Details
+- **File**: ${errorFile}
+- **Line**: ${errorLine}${errorColumn ? `, Column: ${errorColumn}` : ''}
+- **Error Message**: ${errorMessage}
+
+## Project Files (Current State)
+${projectFiles?.map((file: any) => `
+### ${file.path}
+\`\`\`${file.path.endsWith('.ts') || file.path.endsWith('.tsx') ? 'typescript' : file.path.endsWith('.js') || file.path.endsWith('.jsx') ? 'javascript' : ''}
+${file.content}
+\`\`\`
+`).join('') || 'No files provided'}
+
+## Your Task
+1. **Analyze the error** and identify the root cause
+2. **Fix the problematic file** with the correct implementation
+3. **Provide complete fixed code** for the affected file(s)
+4. **Explain the fix** briefly
+
+Please provide the corrected code using the same boltArtifact format that was used to create the project originally. Focus on fixing the specific error while maintaining the project's overall structure and functionality.
+
+Return ONLY the fixed code in the proper boltArtifact format, no explanation needed.`;
+
+        let fixResponse: string;
+        
+        if (provider === "claude") {
+            const response = await anthropic.messages.create({
+                messages: [{ role: "user", content: errorPrompt }],
+                model: "claude-sonnet-4-5",
+                max_tokens: 16384,
+                system: getSystemPrompt(),
+            });
+            fixResponse = (response.content[0] as TextBlock).text;
+        } else {
+            const systemPrompt = getSystemPrompt();
+            const formattedMessages = [
+                { role: "system" as const, content: systemPrompt },
+                { role: "user" as const, content: errorPrompt }
+            ];
+            
+            const response = await openai.chat.completions.create({
+                model: "qwen/qwen3-coder-480b-a35b-instruct",
+                messages: formattedMessages,
+                temperature: 0.3, // Lower temperature for more precise fixes
+                top_p: 0.8,
+                max_tokens: 32000
+            });
+            fixResponse = response.choices[0]?.message?.content || "";
+        }
+        
+        console.log('✅ Error fix response generated');
+        console.log('🔧 Fix response preview:', fixResponse.substring(0, 200) + '...');
+        
+        res.json({ 
+            response: fixResponse,
+            fixApplied: true,
+            originalError: {
+                file: errorFile,
+                line: errorLine,
+                column: errorColumn,
+                message: errorMessage
+            }
+        });
+        
+    } catch (error) {
+        console.error('❌ Error feedback endpoint error:', error);
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        res.status(500).json({ 
+            message: "Error processing error feedback request", 
+            error: errorMessage,
+            fixApplied: false
+        });
+    }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Backend server running on port ${PORT}`);

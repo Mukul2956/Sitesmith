@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Send, Sparkles, Gift, FileText, Users, Zap, Brain } from 'lucide-react';
+import { Send, Sparkles, Gift, FileText, Users, Zap, Brain, Folder, Calendar, User, Eye, Plus } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { projectService, Project } from '../services/projectService';
 
 export type AIProvider = 'nvidia' | 'claude';
 
@@ -9,6 +10,31 @@ export function Home() {
   const navigate = useNavigate();
   const [prompt, setMessage] = useState('');
   const [provider, setProvider] = useState<AIProvider>('nvidia');
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  
+  useEffect(() => {
+    loadRecentProjects();
+  }, []);
+
+  const loadRecentProjects = async () => {
+    try {
+      setLoadingProjects(true);
+      const response = await projectService.getProjects(undefined, 1, 6); // Get first 6 projects
+      setProjects(response.projects);
+    } catch (err) {
+      console.error('Error loading projects:', err);
+    } finally {
+      setLoadingProjects(false);
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric'
+    });
+  };
   
   const handleGenerate = () => {
     if (prompt.trim()) {
@@ -155,6 +181,98 @@ export function Home() {
               Press Enter to generate • Shift+Enter for new line
             </p>
           </div>
+        </div>
+
+        {/* Recent Projects Section */}
+        <div className="w-[95%] max-w-none px-4 pb-16">
+          <div className="bg-black backdrop-blur-sm border border-white/10 rounded-2xl p-8">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-white">Recent Projects</h2>
+              <button
+                onClick={() => navigate('/projects')}
+                className="text-white/70 hover:text-white transition-colors flex items-center gap-2"
+              >
+                View All
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          
+          {loadingProjects ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-6 animate-pulse">
+                  <div className="h-4 bg-white/10 rounded mb-3"></div>
+                  <div className="h-3 bg-white/10 rounded mb-2"></div>
+                  <div className="h-3 bg-white/10 rounded mb-4 w-3/4"></div>
+                  <div className="h-8 bg-white/10 rounded"></div>
+                </div>
+              ))}
+            </div>
+          ) : projects.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {projects.map((project) => (
+                <div
+                  key={project.id}
+                  className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-6 hover:bg-white/10 transition-all group cursor-pointer"
+                  onClick={() => navigate(`/workspace/${project.id}`)}
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <h3 className="text-white font-semibold truncate">
+                      {project.name}
+                    </h3>
+                    <span className={`px-2 py-1 text-xs rounded-full ${
+                      project.status === 'active' ? 'bg-green-500/20 text-green-400' :
+                      project.status === 'completed' ? 'bg-blue-500/20 text-blue-400' :
+                      'bg-gray-500/20 text-gray-400'
+                    }`}>
+                      {project.status}
+                    </span>
+                  </div>
+                  
+                  {project.description && (
+                    <p className="text-white/60 text-sm mb-3 line-clamp-2">
+                      {project.description}
+                    </p>
+                  )}
+
+                  <div className="space-y-1 mb-4 text-xs text-white/50">
+                    <div className="flex items-center gap-2">
+                      <User className="w-3 h-3" />
+                      <span className="capitalize">{project.aiProvider}</span>
+                      <span className="mx-1">•</span>
+                      <span className="capitalize">{project.template}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Calendar className="w-3 h-3" />
+                      <span>Updated {formatDate(project.updatedAt)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Folder className="w-3 h-3" />
+                      <span>{project.files.length} files</span>
+                    </div>
+                  </div>
+
+                  <button className="w-full bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-2 transition-all group-hover:bg-white/30">
+                    <Eye className="w-4 h-4" />
+                    Open Project
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-8 max-w-md mx-auto">
+                <Folder className="w-12 h-12 mx-auto text-white/40 mb-4" />
+                <h3 className="text-lg font-medium text-white mb-2">
+                  No projects yet
+                </h3>
+                <p className="text-white/60 mb-6">
+                  Create your first AI-generated project below.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
         </div>
       </div>
     </div>
