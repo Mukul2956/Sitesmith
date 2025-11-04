@@ -24,6 +24,8 @@ const ProjectsPage: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
+  const allSelected = projects.length > 0 && selectedProjects.length === projects.length;
   
   useEffect(() => {
     loadProjects();
@@ -52,6 +54,50 @@ const ProjectsPage: React.FC = () => {
     
     setProjectToDelete(project);
     setDeleteDialogOpen(true);
+  };
+
+  const handleSelectProject = (projectId: string) => {
+    setSelectedProjects(prev =>
+      prev.includes(projectId)
+        ? prev.filter(id => id !== projectId)
+        : [...prev, projectId]
+    );
+  };
+
+  const handleSelectAll = () => {
+    if (allSelected) {
+      setSelectedProjects([]);
+    } else {
+      setSelectedProjects(projects.map(p => p.id));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedProjects.length === 0) return;
+    setIsDeleting(true);
+    try {
+      await Promise.all(selectedProjects.map(id => projectService.deleteProject(id)));
+      setSelectedProjects([]);
+      loadProjects();
+    } catch (err) {
+      setError('Failed to delete selected projects. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    if (projects.length === 0) return;
+    setIsDeleting(true);
+    try {
+      await Promise.all(projects.map(p => projectService.deleteProject(p.id)));
+      setSelectedProjects([]);
+      loadProjects();
+    } catch (err) {
+      setError('Failed to delete all projects. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const confirmDeleteProject = async () => {
@@ -114,20 +160,36 @@ const ProjectsPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="flex justify-between items-center mb-8">
+        <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
           <div>
             <h1 className="text-3xl font-bold text-foreground">My Projects</h1>
             <p className="text-muted-foreground mt-2">
               Manage and continue working on your AI-generated projects
             </p>
           </div>
-          <button
-            onClick={() => navigate('/workspace')}
-            className="btn-neon flex items-center gap-2"
-          >
-            <Plus size={20} />
-            New Project
-          </button>
+          <div className="flex flex-col md:flex-row gap-2 items-center">
+            <button
+              onClick={handleDeleteAll}
+              className="btn-glass px-4 py-2 text-sm text-destructive border-destructive/50"
+              disabled={projects.length === 0 || isDeleting}
+            >
+              Delete All
+            </button>
+            <button
+              onClick={handleDeleteSelected}
+              className="btn-glass px-4 py-2 text-sm text-destructive border-destructive/50"
+              disabled={selectedProjects.length === 0 || isDeleting}
+            >
+              Delete Selected
+            </button>
+            <button
+              onClick={() => navigate('/workspace')}
+              className="btn-neon flex items-center gap-2"
+            >
+              <Plus size={20} />
+              New Project
+            </button>
+          </div>
         </div>
 
         {/* Filter tabs */}
@@ -178,75 +240,91 @@ const ProjectsPage: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {projects.map((project) => (
-              <div
-                key={project.id}
-                className="glass-strong rounded-2xl hover:bg-glass/30 transition-all hover:glow-cyan group"
-              >
-                <div className="p-6">
-                  <div className="flex justify-between items-start mb-4">
-                    <h3 className="text-lg font-semibold text-foreground truncate">
-                      {project.name}
-                    </h3>
-                    <span className={`px-3 py-1 text-xs font-medium rounded-full ${getStatusColor(project.status)}`}>
-                      {project.status}
-                    </span>
-                  </div>
-                  
-                  {project.description && (
-                    <p className="text-muted-foreground text-sm mb-4 line-clamp-2">
-                      {project.description}
-                    </p>
-                  )}
-
-                  <div className="space-y-2 mb-4 text-sm text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <User size={14} />
-                      <span className="capitalize">{project.aiProvider}</span>
-                      <span className="mx-1">•</span>
-                      <span className="capitalize">{project.template}</span>
+          <div>
+            <div className="flex items-center mb-2">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={handleSelectAll}
+                className="mr-2 scale-125 accent-primary"
+                aria-label="Select all projects"
+              />
+              <span className="text-muted-foreground text-sm">Select All</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {projects.map((project) => (
+                <div
+                  key={project.id}
+                  className="glass-strong rounded-2xl hover:bg-glass/30 transition-all hover:glow-cyan group relative"
+                >
+                  <div className="p-6 pt-2">
+                    <div className="flex justify-between items-start mb-4">
+                      <h3 className="text-lg font-semibold text-foreground truncate">
+                        {project.name}
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-3 py-1 text-xs font-medium rounded-full ${getStatusColor(project.status)}`}>
+                          {project.status}
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={selectedProjects.includes(project.id)}
+                          onChange={() => handleSelectProject(project.id)}
+                          className="scale-125 accent-primary ml-2"
+                          aria-label={`Select project ${project.name}`}
+                        />
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Calendar size={14} />
-                      <span>Updated {formatDate(project.updatedAt)}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Folder size={14} />
-                      <span>{project.files.length} files</span>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => navigate(`/workspace/${project.id}`)}
-                      className="flex-1 bg-primary hover:bg-primary/80 text-primary-foreground px-4 py-2 rounded-xl text-sm flex items-center justify-center gap-1 transition-all hover:glow-cyan"
-                    >
-                      <Eye size={16} />
-                      Open
-                    </button>
-                    
-                    {project.status !== 'archived' && (
-                      <button
-                        onClick={() => handleArchiveProject(project.id)}
-                        className="btn-glass px-3 py-2 text-sm"
-                        title="Archive project"
-                      >
-                        <Archive size={16} />
-                      </button>
+                    {project.description && (
+                      <p className="text-muted-foreground text-sm mb-4 line-clamp-2">
+                        {project.description}
+                      </p>
                     )}
-                    
-                    <button
-                      onClick={() => handleDeleteProject(project.id)}
-                      className="glass border-destructive/30 bg-destructive/10 hover:bg-destructive/20 text-destructive px-3 py-2 rounded-xl text-sm transition-all hover:border-destructive/50"
-                      title="Delete project"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <div className="space-y-2 mb-4 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        <User size={14} />
+                        <span className="capitalize">{project.aiProvider}</span>
+                        <span className="mx-1">•</span>
+                        <span className="capitalize">{project.template}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Calendar size={14} />
+                        <span>Updated {formatDate(project.updatedAt)}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Folder size={14} />
+                        <span>{project.files.length} files</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => navigate(`/workspace/${project.id}`)}
+                        className="flex-1 bg-primary hover:bg-primary/80 text-primary-foreground px-4 py-2 rounded-xl text-sm flex items-center justify-center gap-1 transition-all hover:glow-cyan"
+                      >
+                        <Eye size={16} />
+                        Open
+                      </button>
+                      {project.status !== 'archived' && (
+                        <button
+                          onClick={() => handleArchiveProject(project.id)}
+                          className="btn-glass px-3 py-2 text-sm"
+                          title="Archive project"
+                        >
+                          <Archive size={16} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDeleteProject(project.id)}
+                        className="glass border-destructive/30 bg-destructive/10 hover:bg-destructive/20 text-destructive px-3 py-2 rounded-xl text-sm transition-all hover:border-destructive/50"
+                        title="Delete project"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
 

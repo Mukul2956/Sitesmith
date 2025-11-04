@@ -1,5 +1,5 @@
 import { WebContainer } from '@webcontainer/api';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 interface PreviewFrameProps {
   webContainer: WebContainer;
@@ -11,24 +11,78 @@ interface PreviewInfo {
   baseUrl: string;
 }
 
+interface ProcessRef {
+  name: string;
+  process: any;
+}
+
 export function PreviewFrame({ webContainer }: PreviewFrameProps) {
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [logs, setLogs] = useState<string[]>([]);
   const [previews, setPreviews] = useState<PreviewInfo[]>([]);
+  const [retryCount, setRetryCount] = useState(0);
+  
+  // Process tracking for cleanup
+  const runningProcesses = useRef<ProcessRef[]>([]);
+  const startupTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  async function main() {
+  // Cleanup function for all processes and listeners
+  const cleanup = async () => {
+    console.log('🧹 Cleaning up processes and listeners...');
+    
+    // Clear startup timeout
+    if (startupTimeout.current) {
+      clearTimeout(startupTimeout.current);
+      startupTimeout.current = null;
+    }
+    
+    // Clear process tracking (processes will be cleaned up by WebContainer)
+    runningProcesses.current = [];
+  };
+
+  // Enhanced retry logic with exponential backoff
+  const retryWithBackoff = async (attempt: number = 0) => {
+    const maxRetries = 3;
+    const baseDelay = 1000; // 1 second
+    
+    if (attempt >= maxRetries) {
+      setError('Failed to start servers after multiple attempts. Please try again.');
+      setIsLoading(false);
+      return;
+    }
+    
+    const delay = baseDelay * Math.pow(2, attempt); // Exponential backoff
+    console.log(`🔄 Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms delay...`);
+    
+    await new Promise(resolve => setTimeout(resolve, delay));
+    setRetryCount(attempt + 1);
+    
+    try {
+      await cleanup(); // Clean up previous attempt
+      await startServers(); // Try again
+    } catch (err) {
+      console.error(`❌ Retry attempt ${attempt + 1} failed:`, err);
+      await retryWithBackoff(attempt + 1);
+    }
+  };
+
+  async function startServers() {
     try {
       setIsLoading(true);
       setError(null);
-      setLogs([]);
       setPreviews([]);
+      
+      // Set startup timeout to prevent infinite loading
+      startupTimeout.current = setTimeout(() => {
+        console.warn('⏰ Server startup timeout reached');
+        setError('Server startup timed out. Please try again.');
+        setIsLoading(false);
+      }, 120000); // 2 minutes timeout
       
       // Set up port listener first (based on bolt.new approach)
       const handlePortEvent = (port: number, type: 'open' | 'close', url: string) => {
         console.log(`Port event: ${type} on port ${port}, URL: ${url}`);
-        setLogs(prev => [...prev, `Port ${port}: ${type} - ${url}`]);
         
         setPreviews(currentPreviews => {
           const existingIndex = currentPreviews.findIndex(p => p.port === port);
@@ -59,7 +113,12 @@ export function PreviewFrame({ webContainer }: PreviewFrameProps) {
         if (type === 'open') {
           setUrl(url);
           setIsLoading(false);
-          setLogs(prev => [...prev, `Preview ready at ${url}`]);
+          
+          // Clear timeout on successful start
+          if (startupTimeout.current) {
+            clearTimeout(startupTimeout.current);
+            startupTimeout.current = null;
+          }
         }
       };
 
@@ -67,14 +126,41 @@ export function PreviewFrame({ webContainer }: PreviewFrameProps) {
       webContainer.on('port', handlePortEvent);
       
       console.log('Starting npm install...');
-      setLogs(prev => [...prev, 'Installing dependencies...']);
       
-      // Check which package.json we're using
+      // Check for fullstack project structure and prioritize frontend for preview
+      let workingDirectory = '.';
+      let packageData: any = null;
+      
       try {
-        const packageJsonContent = await webContainer.fs.readFile('package.json', 'utf8');
-        console.log('📋 Using package.json:', packageJsonContent.substring(0, 200) + '...');
-        const packageData = JSON.parse(packageJsonContent);
-        console.log('📋 Available scripts:', Object.keys(packageData.scripts || {}));
+        // Try different package.json locations for fullstack projects
+        const packageJsonPaths = [
+          { path: 'frontend/package.json', workingDir: 'frontend' },
+          { path: 'package.json', workingDir: '.' },
+          { path: 'backend/package.json', workingDir: 'backend' }
+        ];
+        
+        for (const { path, workingDir } of packageJsonPaths) {
+          try {
+            const content = await webContainer.fs.readFile(path, 'utf8');
+            const parsed = JSON.parse(content);
+            
+            // Prefer package.json with dev script for preview (usually frontend)
+            if (parsed.scripts?.dev) {
+              workingDirectory = workingDir;
+              packageData = parsed;
+              console.log(`📋 Using package.json at: ${path} with dev script`);
+              console.log(`📁 Working directory: ${workingDirectory}`);
+              console.log('📋 Available scripts:', Object.keys(parsed.scripts || {}));
+              break;
+            }
+          } catch {
+            // Continue trying other paths
+          }
+        }
+        
+        if (!packageData) {
+          throw new Error('No package.json with dev script found');
+        }
         
         if (!packageData.scripts?.dev) {
           console.warn('⚠️ No "dev" script found in package.json. Available scripts:', Object.keys(packageData.scripts || {}));
@@ -83,59 +169,157 @@ export function PreviewFrame({ webContainer }: PreviewFrameProps) {
           return;
         }
       } catch (err) {
-        console.error('❌ Could not read package.json:', err);
-        setError('Could not read package.json');
+        console.error('❌ Could not find valid package.json:', err);
+        setError('Could not find package.json with dev script');
         setIsLoading(false);
         return;
       }
       
-      const installProcess = await webContainer.spawn('npm', ['install']);
+      const installProcess = await webContainer.spawn('npm', ['install'], {
+        cwd: workingDirectory
+      });
+
+      // Track install process
+      runningProcesses.current.push({
+        name: `npm-install-${workingDirectory}`,
+        process: installProcess
+      });
 
       installProcess.output.pipeTo(new WritableStream({
         write(data) {
-          console.log('Install output:', data);
+          const output = String(data);
+          console.log('Install output:', output);
         }
       }));
 
       // Wait for install to complete
       const installExitCode = await installProcess.exit;
       
+      // Remove from tracking after completion
+      runningProcesses.current = runningProcesses.current.filter(p => p.name !== `npm-install-${workingDirectory}`);
+      
       if (installExitCode !== 0) {
         throw new Error(`npm install failed with exit code ${installExitCode}`);
       }
       
-      setLogs(prev => [...prev, 'Dependencies installed successfully']);
-      console.log('Starting dev server...');
-      setLogs(prev => [...prev, 'Starting development server...']);
+      console.log(`Starting dev server in ${workingDirectory}...`);
       
-      // Start the dev server (don't await it as it runs continuously)
-      const devProcess = await webContainer.spawn('npm', ['run', 'dev']);
+      // Start the dev server
+      const devProcess = await webContainer.spawn('npm', ['run', 'dev'], {
+        cwd: workingDirectory
+      });
+      
+      // Track dev server process
+      runningProcesses.current.push({
+        name: `dev-server-${workingDirectory}`,
+        process: devProcess
+      });
       
       // Listen for server output
       devProcess.output.pipeTo(new WritableStream({
         write(data) {
-          console.log('Dev server output:', data);
+          const output = String(data);
+          console.log('Dev server output:', output);
         }
       }));
 
-      // The port listener will handle setting the URL when the server is ready
-      setLogs(prev => [...prev, 'Development server starting...']);
-      
-      // Set a generous timeout in case the server doesn't start (120s)
-      setTimeout(() => {
-        if (!url && previews.length === 0) {
-          setError('Server failed to start within 120 seconds');
-          setIsLoading(false);
+      // For fullstack projects, also try to start backend server if it exists
+      if (workingDirectory === 'frontend') {
+        try {
+          const backendPackageJson = await webContainer.fs.readFile('backend/package.json', 'utf8');
+          const backendData = JSON.parse(backendPackageJson);
+          
+          if (backendData.scripts?.dev || backendData.scripts?.start) {
+            console.log('🔧 Starting backend server...');
+            
+            // Install backend dependencies first
+            const backendInstallProcess = await webContainer.spawn('npm', ['install'], {
+              cwd: 'backend'
+            });
+            
+            // Track backend install process
+            runningProcesses.current.push({
+              name: 'npm-install-backend',
+              process: backendInstallProcess
+            });
+            
+            backendInstallProcess.output.pipeTo(new WritableStream({
+              write(data) {
+                const output = String(data);
+                console.log('Backend install output:', output);
+              }
+            }));
+            
+            await backendInstallProcess.exit;
+            
+            // Remove from tracking after completion
+            runningProcesses.current = runningProcesses.current.filter(p => p.name !== 'npm-install-backend');
+            
+            // Start backend dev server
+            const backendDevProcess = await webContainer.spawn('npm', ['run', backendData.scripts.dev ? 'dev' : 'start'], {
+              cwd: 'backend'
+            });
+            
+            // Track backend dev server process
+            runningProcesses.current.push({
+              name: 'dev-server-backend',
+              process: backendDevProcess
+            });
+            
+            backendDevProcess.output.pipeTo(new WritableStream({
+              write(data) {
+                const output = String(data);
+                console.log('Backend server output:', output);
+              }
+            }));
+            
+            console.log('✅ Backend server started');
+          }
+        } catch (err) {
+          console.log('ℹ️ No backend server to start or backend start failed:', err);
         }
-      }, 120000);
+      }
+
+      // The port listener will handle setting the URL when the server is ready
+      console.log('⏳ Waiting for development server to be ready...');
       
-    } catch (err) {
-      console.error('Preview error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to start preview');
+    } catch (error) {
+      console.error('❌ Failed to start preview server:', error);
+      setError(`Failed to start preview server: ${error}`);
       setIsLoading(false);
-      setLogs(prev => [...prev, `Error: ${err instanceof Error ? err.message : 'Unknown error'}`]);
+      
+      // Try retry logic
+      if (retryCount < 3) {
+        console.log('🔄 Attempting retry...');
+        await retryWithBackoff(retryCount);
+      }
     }
   }
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cleanup();
+    };
+  }, []);
+
+  // Main entry point
+  async function main() {
+    try {
+      setIsLoading(true);
+      setRetryCount(0);
+      await startServers();
+    } catch (error) {
+      console.error('❌ Error starting servers:', error);
+      await retryWithBackoff(0);
+    }
+  }
+
+  // Handle manual retry
+  const handleRetry = async () => {
+    await cleanup();
+    await main();
+  };
 
   // Update URL when previews change
   useEffect(() => {
@@ -145,7 +329,6 @@ export function PreviewFrame({ webContainer }: PreviewFrameProps) {
       if (readyPreview && readyPreview.baseUrl) {
         setUrl(readyPreview.baseUrl);
         setIsLoading(false);
-        setLogs(prev => [...prev, `Preview ready at ${readyPreview.baseUrl}`]);
       }
     }
   }, [previews, url]);
@@ -163,15 +346,6 @@ export function PreviewFrame({ webContainer }: PreviewFrameProps) {
           <div className="text-center text-gray-400">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
             <p className="mb-2">Starting preview server...</p>
-            {logs.length > 0 && (
-              <div className="text-xs max-w-md">
-                <div className="bg-black/20 rounded p-2 max-h-32 overflow-y-auto">
-                  {logs.slice(-5).map((log, i) => (
-                    <div key={i} className="text-left">{log}</div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -182,33 +356,25 @@ export function PreviewFrame({ webContainer }: PreviewFrameProps) {
             <p className="mb-2">Preview Error:</p>
             <p className="text-sm mb-4">{error}</p>
             <button 
-              onClick={main}
+              onClick={handleRetry}
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
             >
               Retry
             </button>
-            {logs.length > 0 && (
-              <div className="mt-4 text-xs max-w-md mx-auto">
-                <div className="bg-black/20 rounded p-2 max-h-32 overflow-y-auto">
-                  {logs.map((log, i) => (
-                    <div key={i} className="text-left text-gray-300">{log}</div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}
       
       {url && !isLoading && !error && (
         <div className="flex-1 flex flex-col">
-          {/* Preview URL removed from UI - available in console logs */}
           <iframe 
+            key={url} // Force remount when URL changes
             width="100%" 
             height="100%" 
             src={url} 
             title="Live Preview"
             className="border-0 flex-1"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
             onLoad={() => console.log('Preview iframe loaded')}
             onError={(e) => console.error('Preview iframe error:', e)}
           />

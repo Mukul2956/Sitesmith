@@ -851,11 +851,14 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
 
       // Check if there's a dev script in package.json
       try {
-        const packageJsonContent = await wc.fs.readFile(`${packageDir}/package.json`, 'utf-8');
+        const packageJsonPath = packageDir === '.' ? 'package.json' : `${packageDir}/package.json`;
+        console.log(`📋 Checking for package.json at: ${packageJsonPath}`);
+        
+        const packageJsonContent = await wc.fs.readFile(packageJsonPath, 'utf-8');
         const packageData = JSON.parse(packageJsonContent);
         
         if (packageData.scripts?.dev) {
-          console.log(`🎯 Found dev script in ${packageDir}/package.json`);
+          console.log(`🎯 Found dev script in ${packageJsonPath}`);
           
           // Clean up any existing dev servers first
           await cleanupDevServerProcesses();
@@ -891,10 +894,10 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
           console.log(`✅ Development server started for ${packageDir}`);
           setIsPreviewReady(true);
         } else {
-          console.log(`⚠️ No dev script found in ${packageDir}/package.json`);
+          console.log(`⚠️ No dev script found in ${packageJsonPath}`);
         }
       } catch (error) {
-        console.error('❌ Error reading package.json or starting dev server:', error);
+        console.error(`❌ Error reading ${packageDir === '.' ? 'package.json' : packageDir + '/package.json'} or starting dev server:`, error);
       }
     } catch (error) {
       console.error('❌ Preview startup error:', error);
@@ -941,43 +944,35 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
         return;
       }
 
-      // Check for main package.json (React/frontend)
-      try {
-        const mainPackageJson = await wc.fs.readFile('package.json', 'utf-8');
-        const mainPackageData = JSON.parse(mainPackageJson);
-        
-        if (mainPackageData.scripts?.dev && !isPreviewReady) {
-          console.log('🎯 Found main dev script, starting preview...');
-          await startPreviewAfterPackages('.');
-        }
-      } catch (error) {
-        console.log('ℹ️ No main package.json found');
-      }
+      // Check for package.json files in priority order for fullstack projects
+      const packageJsonChecks = [
+        { path: 'frontend/package.json', name: 'frontend', workingDir: 'frontend' },
+        { path: 'package.json', name: 'main', workingDir: '.' },
+        { path: 'backend/package.json', name: 'backend', workingDir: 'backend' }
+      ];
 
-      // Check for backend package.json
-      try {
-        const backendPackageJson = await wc.fs.readFile('backend/package.json', 'utf-8');
-        const backendPackageData = JSON.parse(backendPackageJson);
-        
-        if (backendPackageData.scripts?.dev) {
-          console.log('🎯 Found backend dev script');
-          // Could start backend dev server here if needed
+      for (const check of packageJsonChecks) {
+        try {
+          const packageJsonContent = await wc.fs.readFile(check.path, 'utf-8');
+          const packageData = JSON.parse(packageJsonContent);
+          
+          console.log(`📋 Found ${check.name} package.json at: ${check.path}`);
+          console.log(`📋 Available scripts: ${Object.keys(packageData.scripts || {}).join(', ')}`);
+          
+          // For frontend/main package.json, start preview if dev script exists
+          if ((check.name === 'frontend' || check.name === 'main') && packageData.scripts?.dev && !isPreviewReady) {
+            console.log(`🎯 Found ${check.name} dev script, starting preview...`);
+            await startPreviewAfterPackages(check.workingDir);
+            break; // Only start one preview
+          }
+          // For backend package.json, just log (could start backend dev server if needed)
+          else if (check.name === 'backend' && packageData.scripts?.dev) {
+            console.log('🎯 Found backend dev script');
+            // Could start backend dev server here if needed
+          }
+        } catch (error) {
+          console.log(`ℹ️ No ${check.name} package.json found at ${check.path}`);
         }
-      } catch (error) {
-        console.log('ℹ️ No backend package.json found');
-      }
-
-      // Check for frontend package.json in fullstack projects
-      try {
-        const frontendPackageJson = await wc.fs.readFile('frontend/package.json', 'utf-8');
-        const frontendPackageData = JSON.parse(frontendPackageJson);
-        
-        if (frontendPackageData.scripts?.dev && !isPreviewReady) {
-          console.log('🎯 Found frontend dev script in fullstack project, starting preview...');
-          await startPreviewAfterPackages('frontend');
-        }
-      } catch (error) {
-        console.log('ℹ️ No frontend package.json found');
       }
     } catch (error) {
       console.error('❌ Error checking development workflow:', error);
@@ -997,26 +992,81 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
       incrementPendingFileOperations();
       
       try {
-        // Special handling for package files to avoid conflicts
+        // Enhanced fullstack project detection - only if there are BOTH frontend and backend indicators
         let finalPath = step.path;
         
-        // If this is a Node.js package.json (small content, only test script), move it to backend/
-        if (step.path === 'package.json' && step.code && step.code.length < 200 && step.code.includes('"test"') && !step.code.includes('"dev"')) {
-          finalPath = 'backend/package.json';
-          console.log(`📝 Moving Node.js package.json to ${finalPath} to avoid conflict`);
-        }
+        // Check if we already have files indicating fullstack structure
+        const hasExplicitStructure = filesRef.current.some(f => 
+          f.path.startsWith('frontend/') || f.path.startsWith('backend/')
+        );
         
-        // For fullstack projects, automatically move package files to correct directories
-        if (step.path.startsWith('frontend/')) {
-          // Already in frontend folder, keep as-is
-          finalPath = step.path;
-        } else if (step.path.startsWith('backend/')) {
-          // Already in backend folder, keep as-is
-          finalPath = step.path;
-        } else if (step.path === 'package.json' && step.code && step.code.includes('"node-starter"')) {
-          // This is clearly a Node.js package.json, move to backend
-          finalPath = 'backend/package.json';
-          console.log(`📝 Moving Node.js package.json to ${finalPath} for fullstack project`);
+        // Check if current step has explicit fullstack paths
+        const hasExplicitPaths = step.path.startsWith('frontend/') || step.path.startsWith('backend/');
+        
+        // Detect fullstack project more conservatively
+        const isFullstackProject = hasExplicitStructure || hasExplicitPaths || (
+          // Only consider fullstack if we have indicators of BOTH frontend AND backend
+          step.code && (
+            (step.code.includes('express') && step.code.includes('cors')) || // Clear backend indicators
+            (step.code.includes('react') && step.code.includes('express')) || // Both in same file
+            (step.path.includes('frontend/') || step.path.includes('backend/')) // Explicit paths
+          )
+        );
+        
+        console.log(`🔍 Analyzing file: ${step.path}`);
+        console.log(`📊 hasExplicitStructure: ${hasExplicitStructure}, hasExplicitPaths: ${hasExplicitPaths}, isFullstackProject: ${isFullstackProject}`);
+        
+        // Smart path routing for fullstack projects
+        if (isFullstackProject) {
+          // If path already includes frontend/ or backend/, keep as-is
+          if (step.path.startsWith('frontend/') || step.path.startsWith('backend/')) {
+            finalPath = step.path;
+            console.log(`📁 Path already structured: ${finalPath}`);
+          }
+          // Route files to appropriate directories based on content and type
+          else if (step.path === 'package.json') {
+            // Analyze package.json content to determine if it's frontend or backend
+            if (step.code.includes('react') || step.code.includes('vite') || step.code.includes('"dev"')) {
+              finalPath = 'frontend/package.json';
+              console.log(`📝 Moving React/Vite package.json to ${finalPath}`);
+            } else if (step.code.includes('express') || step.code.includes('"node-starter"') || step.code.includes('"test"')) {
+              finalPath = 'backend/package.json';
+              console.log(`📝 Moving Node.js package.json to ${finalPath}`);
+            }
+          }
+          // Route source files
+          else if (step.path.startsWith('src/')) {
+            // Check content to determine if it's frontend or backend
+            if (step.code.includes('React') || step.code.includes('JSX') || step.code.includes('tsx') || step.code.includes('useState')) {
+              finalPath = `frontend/${step.path}`;
+              console.log(`📝 Moving React component to ${finalPath}`);
+            } else if (step.code.includes('express') || step.code.includes('require(') || step.code.includes('app.listen')) {
+              finalPath = `backend/${step.path}`;
+              console.log(`📝 Moving Node.js file to ${finalPath}`);
+            }
+          }
+          // Route config files
+          else if (step.path.includes('vite.config') || step.path.includes('tailwind.config') || step.path === 'index.html') {
+            finalPath = `frontend/${step.path}`;
+            console.log(`📝 Moving frontend config to ${finalPath}`);
+          }
+          // Route other common files
+          else if (step.path.includes('.ts') || step.path.includes('.js')) {
+            // Default backend for .ts/.js files if no clear React indicators
+            if (!step.code.includes('React') && !step.code.includes('JSX')) {
+              finalPath = `backend/${step.path}`;
+              console.log(`📝 Moving server file to ${finalPath}`);
+            }
+          }
+        }
+        // Single project structure - keep files in root
+        else {
+          console.log(`📄 Single project detected - keeping files in root structure`);
+          // Only move obvious backend files to avoid conflicts
+          if (step.path === 'package.json' && step.code && step.code.length < 200 && step.code.includes('"test"') && !step.code.includes('"dev"') && !step.code.includes('"build"')) {
+            finalPath = 'backend/package.json';
+            console.log(`📝 Moving minimal Node.js package.json to ${finalPath} to avoid conflict`);
+          }
         }
         
         // Save to webcontainer immediately
@@ -1136,6 +1186,22 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
   useEffect(() => {
     messagesRef.current = llmMessages;
   }, [llmMessages]);
+
+  // Handle preview tab activation - start dev server if needed
+  useEffect(() => {
+    if (activeTab === 'preview' && !isPreviewReady && files.length > 0) {
+      console.log('🎯 Preview tab activated - checking for dev server...');
+      
+      // Check if we have any package.json files with dev script
+      const packageJsonFiles = files.filter(f => f.path.endsWith('package.json'));
+      if (packageJsonFiles.length > 0) {
+        console.log('📦 Found package.json files, attempting to start preview...');
+        checkForDevelopmentWorkflow();
+      } else {
+        console.log('⚠️ No package.json files found for preview');
+      }
+    }
+  }, [activeTab, isPreviewReady, files.length]);
 
   useEffect(() => {
     console.log('=== useEffect triggered ===');
@@ -1365,26 +1431,81 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
       incrementPendingFileOperations();
       
       try {
-        // Apply the same path remapping logic as handleStreamingStep for consistency
+        // Enhanced fullstack project detection - only if there are BOTH frontend and backend indicators
         let finalPath = step.path;
         
-        // If this is a Node.js package.json (small content, only test script), move it to backend/
-        if (step.path === 'package.json' && step.code && step.code.length < 200 && step.code.includes('"test"') && !step.code.includes('"dev"')) {
-          finalPath = 'backend/package.json';
-          console.log(`📝 Moving Node.js package.json to ${finalPath} to avoid conflict`);
-        }
+        // Check if we already have files indicating fullstack structure
+        const hasExplicitStructure = filesRef.current.some(f => 
+          f.path.startsWith('frontend/') || f.path.startsWith('backend/')
+        );
         
-        // For fullstack projects, automatically move package files to correct directories
-        if (step.path.startsWith('frontend/')) {
-          // Already in frontend folder, keep as-is
-          finalPath = step.path;
-        } else if (step.path.startsWith('backend/')) {
-          // Already in backend folder, keep as-is
-          finalPath = step.path;
-        } else if (step.path === 'package.json' && step.code && step.code.includes('"node-starter"')) {
-          // This is clearly a Node.js package.json, move to backend
-          finalPath = 'backend/package.json';
-          console.log(`📝 Moving Node.js package.json to ${finalPath} for fullstack project`);
+        // Check if current step has explicit fullstack paths
+        const hasExplicitPaths = step.path.startsWith('frontend/') || step.path.startsWith('backend/');
+        
+        // Detect fullstack project more conservatively
+        const isFullstackProject = hasExplicitStructure || hasExplicitPaths || (
+          // Only consider fullstack if we have indicators of BOTH frontend AND backend
+          step.code && (
+            (step.code.includes('express') && step.code.includes('cors')) || // Clear backend indicators
+            (step.code.includes('react') && step.code.includes('express')) || // Both in same file
+            (step.path.includes('frontend/') || step.path.includes('backend/')) // Explicit paths
+          )
+        );
+        
+        console.log(`🔍 Analyzing file: ${step.path}`);
+        console.log(`📊 hasExplicitStructure: ${hasExplicitStructure}, hasExplicitPaths: ${hasExplicitPaths}, isFullstackProject: ${isFullstackProject}`);
+        
+        // Smart path routing for fullstack projects
+        if (isFullstackProject) {
+          // If path already includes frontend/ or backend/, keep as-is
+          if (step.path.startsWith('frontend/') || step.path.startsWith('backend/')) {
+            finalPath = step.path;
+            console.log(`📁 Path already structured: ${finalPath}`);
+          }
+          // Route files to appropriate directories based on content and type
+          else if (step.path === 'package.json') {
+            // Analyze package.json content to determine if it's frontend or backend
+            if (step.code.includes('react') || step.code.includes('vite') || step.code.includes('"dev"')) {
+              finalPath = 'frontend/package.json';
+              console.log(`📝 Moving React/Vite package.json to ${finalPath}`);
+            } else if (step.code.includes('express') || step.code.includes('"node-starter"') || step.code.includes('"test"')) {
+              finalPath = 'backend/package.json';
+              console.log(`📝 Moving Node.js package.json to ${finalPath}`);
+            }
+          }
+          // Route source files
+          else if (step.path.startsWith('src/')) {
+            // Check content to determine if it's frontend or backend
+            if (step.code.includes('React') || step.code.includes('JSX') || step.code.includes('tsx') || step.code.includes('useState')) {
+              finalPath = `frontend/${step.path}`;
+              console.log(`📝 Moving React component to ${finalPath}`);
+            } else if (step.code.includes('express') || step.code.includes('require(') || step.code.includes('app.listen')) {
+              finalPath = `backend/${step.path}`;
+              console.log(`📝 Moving Node.js file to ${finalPath}`);
+            }
+          }
+          // Route config files
+          else if (step.path.includes('vite.config') || step.path.includes('tailwind.config') || step.path === 'index.html') {
+            finalPath = `frontend/${step.path}`;
+            console.log(`📝 Moving frontend config to ${finalPath}`);
+          }
+          // Route other common files
+          else if (step.path.includes('.ts') || step.path.includes('.js')) {
+            // Default backend for .ts/.js files if no clear React indicators
+            if (!step.code.includes('React') && !step.code.includes('JSX')) {
+              finalPath = `backend/${step.path}`;
+              console.log(`📝 Moving server file to ${finalPath}`);
+            }
+          }
+        }
+        // Single project structure - keep files in root
+        else {
+          console.log(`📄 Single project detected - keeping files in root structure`);
+          // Only move obvious backend files to avoid conflicts
+          if (step.path === 'package.json' && step.code && step.code.length < 200 && step.code.includes('"test"') && !step.code.includes('"dev"') && !step.code.includes('"build"')) {
+            finalPath = 'backend/package.json';
+            console.log(`📝 Moving minimal Node.js package.json to ${finalPath} to avoid conflict`);
+          }
         }
         
         await saveFileToWebcontainer(finalPath, step.code);
@@ -1463,20 +1584,64 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
       console.log(`📦 Detected package installation: ${packagesToInstall.join(', ')} ${isDev ? '(dev)' : '(production)'}`);
       
       try {
-        // Find and update the appropriate package.json
-        const packageJsonPaths = ['package.json', 'frontend/package.json', 'backend/package.json'];
-        let packageJsonPath = 'package.json';
+        // Enhanced package.json detection for fullstack projects
+        const packageJsonPaths = [
+          'frontend/package.json', // Check frontend first (most common for React/Vite)
+          'backend/package.json',  // Then backend
+          'package.json'          // Finally root level
+        ];
+        let packageJsonPath = '';
         let packageJsonContent = '';
         
-        // Try to find existing package.json
+        // Try to find existing package.json, prioritizing frontend for React packages
         for (const path of packageJsonPaths) {
           try {
-            packageJsonContent = await wc.fs.readFile(path, 'utf-8');
-            packageJsonPath = path;
-            console.log(`📄 Found package.json at: ${path}`);
-            break;
+            const content = await wc.fs.readFile(path, 'utf-8');
+            const parsed = JSON.parse(content);
+            
+            // For React/frontend packages, prefer frontend/package.json
+            if (packagesToInstall.some(pkg => pkg.includes('react') || pkg.includes('vite') || pkg.includes('@types/react'))) {
+              if (path.includes('frontend') || (parsed.dependencies && (parsed.dependencies.react || parsed.dependencies.vite))) {
+                packageJsonContent = content;
+                packageJsonPath = path;
+                console.log(`📄 Found frontend package.json at: ${path} for React packages`);
+                break;
+              }
+            }
+            // For Node.js/backend packages, prefer backend/package.json
+            else if (packagesToInstall.some(pkg => pkg.includes('express') || pkg.includes('@types/node') || pkg.includes('cors'))) {
+              if (path.includes('backend') || (parsed.dependencies && (parsed.dependencies.express || parsed.dependencies.cors))) {
+                packageJsonContent = content;
+                packageJsonPath = path;
+                console.log(`📄 Found backend package.json at: ${path} for Node packages`);
+                break;
+              }
+            }
+            // Use first found package.json as fallback
+            else if (!packageJsonContent) {
+              packageJsonContent = content;
+              packageJsonPath = path;
+              console.log(`📄 Found package.json at: ${path} (fallback)`);
+            }
           } catch {
             // Continue trying other paths
+          }
+        }
+        
+        // If no specific match, use the first found or create new one
+        if (!packageJsonPath && packageJsonContent) {
+          packageJsonPath = packageJsonPaths[0]; // Default to frontend
+        } else if (!packageJsonPath) {
+          // Determine where to create package.json based on package types
+          if (packagesToInstall.some(pkg => pkg.includes('react') || pkg.includes('vite'))) {
+            packageJsonPath = 'frontend/package.json';
+            console.log('📄 Creating new frontend package.json for React packages');
+          } else if (packagesToInstall.some(pkg => pkg.includes('express') || pkg.includes('@types/node'))) {
+            packageJsonPath = 'backend/package.json';
+            console.log('📄 Creating new backend package.json for Node packages');
+          } else {
+            packageJsonPath = 'package.json';
+            console.log('📄 Creating new root package.json');
           }
         }
         
@@ -1545,9 +1710,13 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
           }
         }, 1000);
         
-        // Run the actual install command
-        console.log('🔄 Running package installation...');
+        // Run the actual install command in the correct directory
+        console.log(`🔄 Running package installation in ${packageJsonPath}...`);
+        const workingDir = packageJsonPath.includes('/') ? packageJsonPath.split('/')[0] : '.';
+        console.log(`📁 Working directory: ${workingDir}`);
+        
         const installProcess = await wc.spawn('npm', ['install'], {
+          cwd: workingDir,
           env: { NODE_ENV: 'development' }
         });
         
@@ -1673,22 +1842,45 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
       
       const errors: string[] = [];
       
-      // Check if package.json exists and is valid
-      try {
-        const packageJson = await wc.fs.readFile('package.json', 'utf-8');
-        const packageData = JSON.parse(packageJson);
-        console.log('✅ package.json is valid');
-        
+      // Check for package.json - try multiple locations for fullstack projects
+      let packageJsonFound = false;
+      let packageData: any = null;
+      let packageJsonPath = '';
+      
+      const packageJsonPaths = [
+        'package.json',        // Root level (single project)
+        'frontend/package.json', // Frontend in fullstack
+        'backend/package.json'   // Backend in fullstack
+      ];
+      
+      for (const path of packageJsonPaths) {
+        try {
+          const packageJson = await wc.fs.readFile(path, 'utf-8');
+          packageData = JSON.parse(packageJson);
+          packageJsonPath = path;
+          packageJsonFound = true;
+          console.log(`✅ Found valid package.json at: ${path}`);
+          break; // Use the first valid package.json found
+        } catch {
+          // Continue to next path
+        }
+      }
+      
+      if (packageJsonFound && packageData) {
         // Check for build script and try to run a quick type check
         if (packageData.scripts?.build || packageData.scripts?.['type-check']) {
-          console.log('🔍 Running build check for compilation errors...');
+          console.log(`🔍 Running build check for compilation errors using package.json at: ${packageJsonPath}...`);
+          
+          // Set working directory based on package.json location
+          const workingDir = packageJsonPath.includes('/') ? packageJsonPath.split('/')[0] : '.';
           
           // Try to run build command to check for errors
           const buildScript = packageData.scripts.build || packageData.scripts['type-check'];
           if (buildScript.includes('tsc') || buildScript.includes('vite build')) {
             try {
               const buildProcess = await wc.spawn('npm', ['run', 'build'], {
-                env: { NODE_ENV: 'production' }
+                env: { NODE_ENV: 'production' },
+                cwd: workingDir
               });
               
               let buildOutput = '';
@@ -1728,22 +1920,34 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
             }
           }
         }
-        
-      } catch (error) {
-        errors.push('Invalid or missing package.json');
-        console.error('❌ package.json error:', error);
+      } else {
+        errors.push('Invalid or missing package.json in project structure');
+        console.error('❌ No valid package.json found in any expected location');
       }
       
       // Check essential files based on project type
       try {
-        // Try common entry points
+        // Try common entry points for different project structures
         const possibleEntryPoints = [
+          // Root level (single project)
           'src/main.tsx',
           'src/main.ts', 
           'src/index.tsx',
           'src/index.ts',
           'src/App.tsx',
-          'index.html'
+          'index.html',
+          // Frontend folder (fullstack)
+          'frontend/src/main.tsx',
+          'frontend/src/main.ts',
+          'frontend/src/index.tsx',
+          'frontend/src/index.ts',
+          'frontend/src/App.tsx',
+          'frontend/index.html',
+          // Backend folder (fullstack)
+          'backend/src/index.ts',
+          'backend/src/index.js',
+          'backend/src/server.ts',
+          'backend/src/app.ts'
         ];
         
         let hasEntryPoint = false;
@@ -1759,7 +1963,7 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
         }
         
         if (!hasEntryPoint) {
-          errors.push('No valid entry point found (main.tsx, index.tsx, etc.)');
+          errors.push('No valid entry point found (check frontend/src/ and backend/src/ folders)');
         }
         
       } catch (error) {
@@ -1841,14 +2045,42 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
       const wc = await webcontainerPromise;
       if (!wc) return;
       
-      // Check for dev script
-      const packageJson = await wc.fs.readFile('package.json', 'utf-8');
-      const packageData = JSON.parse(packageJson);
+      // Check for package.json in proper fullstack project structure
+      let packageJsonFound = false;
+      let packageData: any = null;
+      let workingDir = '.';
       
-      if (packageData.scripts?.dev) {
+      const packageJsonPaths = [
+        'frontend/package.json', // Check frontend first (most common for React/Vite)
+        'package.json',          // Then root level
+        'backend/package.json'   // Finally backend (unlikely for preview)
+      ];
+      
+      for (const path of packageJsonPaths) {
+        try {
+          const packageJson = await wc.fs.readFile(path, 'utf-8');
+          const parsed = JSON.parse(packageJson);
+          
+          // Prefer package.json with dev script for preview
+          if (parsed.scripts?.dev) {
+            packageData = parsed;
+            workingDir = path.includes('/') ? path.split('/')[0] : '.';
+            packageJsonFound = true;
+            console.log(`📋 Using package.json at: ${path} for preview server`);
+            console.log(`📁 Working directory: ${workingDir}`);
+            break;
+          }
+        } catch {
+          // Continue trying other paths
+        }
+      }
+      
+      if (packageJsonFound && packageData?.scripts?.dev) {
         await cleanupDevServerProcesses();
         
-        const devProcess = await wc.spawn('npm', ['run', 'dev']);
+        const devProcess = await wc.spawn('npm', ['run', 'dev'], {
+          cwd: workingDir
+        });
         runningProcessesRef.current.push(devProcess);
         
         devProcess.output.pipeTo(new WritableStream({
@@ -2113,7 +2345,19 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
                 }}
               />
             ) : (
-              webcontainer ? <PreviewFrame webContainer={webcontainer} /> : (
+              webcontainer ? (
+                <div className="h-full">
+                  <PreviewFrame webContainer={webcontainer} />
+                  {!isPreviewReady && (
+                    <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center">
+                      <div className="text-center">
+                        <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+                        <p className="text-sm text-muted-foreground">Starting preview server...</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
                 <div className="h-full flex items-center justify-center text-muted-foreground">
                   <p>WebContainer not available</p>
                 </div>
