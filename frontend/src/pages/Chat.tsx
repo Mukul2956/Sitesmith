@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Send, Sparkles, Gift, FileText, Users, Zap, Brain, Folder, Calendar, User, Eye, Plus } from 'lucide-react';
+import { Send, Zap, Brain, Folder, Calendar, User, Eye, Plus } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { projectService, Project } from '../services/projectService';
+import Navigation from '@/components/Navigation';
 
 export type AIProvider = 'nvidia' | 'claude';
 
@@ -64,31 +65,7 @@ export function Home() {
       />
 
       {/* Navigation */}
-      <nav className="relative z-10 flex items-center justify-between" style={{ paddingTop: '10px', paddingBottom: '10px', paddingLeft: '30px', paddingRight: '30px' }}>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-gradient-to-r from-pink-500 to-orange-500 rounded-lg flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-white" />
-          </div>
-          <span className="text-white font-bold text-xl">SiteSmith</span>
-        </div>
-        
-        <div className="hidden md:flex items-center gap-8 text-white/80">
-          <a href="#" className="hover:text-white transition-colors">Community</a>
-          <a href="#" className="hover:text-white transition-colors">Pricing</a>
-          <a href="#" className="hover:text-white transition-colors">Enterprise</a>
-          <a href="#" className="hover:text-white transition-colors">Learn</a>
-          <a href="#" className="hover:text-white transition-colors">Launched</a>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <Gift className="w-5 h-5 text-white/80" />
-          <FileText className="w-5 h-5 text-white/80" />
-          <div className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2">
-            <Users className="w-4 h-4" />
-            <span className="text-sm">Dev's SiteSmith</span>
-          </div>
-        </div>
-      </nav>
+      <Navigation />
 
       {/* Main Content */}
       <div className="relative z-10 flex flex-col items-center justify-center min-h-[calc(100vh-120px)] px-6">
@@ -127,14 +104,10 @@ export function Home() {
               
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <button className="flex items-center gap-2 px-3 py-1.5 bg-gray-800/50 rounded-lg text-white/70 text-sm hover:bg-gray-700/50 transition-colors">
-                    <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                    Public
-                  </button>
-                  <button className="flex items-center gap-2 px-3 py-1.5 bg-gray-800/50 rounded-lg text-white/70 text-sm hover:bg-gray-700/50 transition-colors">
-                    <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                    Supabase
-                  </button>
+                    <button className="flex items-center gap-2 px-3 py-1.5 bg-gray-800/50 rounded-lg text-white/70 text-sm hover:bg-gray-700/50 transition-colors">
+                      <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                      Public
+                    </button>
                   
                   {/* AI Provider Dropdown */}
                   <Select value={provider} onValueChange={(value) => setProvider(value as AIProvider)}>
