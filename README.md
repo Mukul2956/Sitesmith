@@ -1,243 +1,153 @@
-# �️ SiteSmith - AI-Powered Web Development IDE
+# SiteSmith
 
-> Transform ideas into functional web applications through conversational AI
+**AI-Powered Web Development IDE**
 
-SiteSmith is an innovative web-based IDE that leverages Claude AI to generate complete web applications from natural language descriptions. It provides a full-stack development environment with real-time code generation, live preview, and WebContainer integration for instant deployment.
+Transform your ideas into functional web applications through natural language conversations with AI. SiteSmith provides a complete development environment that generates, builds, and deploys applications directly in your browser.
 
-## ✨ Key Features
+## Features
 
-### 🤖 AI-Driven Development
-- **Intelligent Project Type Detection**: Automatically determines whether to create React or Node.js projects
-- **Conversational Code Generation**: Chat with Claude AI to generate, modify, and enhance your code
-- **Step-by-Step Guidance**: AI breaks down complex tasks into manageable build steps
-- **Template-Based Scaffolding**: Pre-configured templates for React and Node.js applications
+- **Multiple AI Provider Support**: Choose from various AI providers including NVIDIA API, Claude AI, and more
+- **Project Management**: Save, organize, and manage your projects with MongoDB persistence
+- **Live Development Environment**: Full-featured IDE with Monaco editor, terminal, and file explorer  
+- **Instant Preview**: See your applications running live with WebContainer integration
+- **Full-Stack Support**: Build both frontend and backend applications seamlessly
+- **No Setup Required**: Everything runs in your browser - no local installation needed
+- **Advanced Code Generation**: Powered by state-of-the-art language models for superior code understanding
 
-### 💻 Integrated Development Environment
-- **Monaco Code Editor**: Full-featured editor with syntax highlighting, IntelliSense, and error detection
-- **Built-in Terminal**: Execute commands directly in the browser environment
-- **File Explorer**: Navigate and manage your project structure
-- **Live Preview**: See changes instantly with WebContainer integration
-- **Tabbed Interface**: Switch between code editing and live preview modes
-
-### 🔧 WebContainer Integration
-- **Browser-Based Runtime**: Run Node.js applications directly in the browser
-- **Real-time File System**: Dynamic file creation and modification
-- **Live Reload**: Instant updates as you modify your code
-- **Full Stack Support**: Both frontend and backend development capabilities
-
-## 🖼️ Screenshots
-
-### Main Interface - AI-Powered Prompt
-![SiteSmith Main Interface](assets/main-interface.png)
-*Beautiful gradient interface where you describe your project to AI*
-
-### Development Environment - Full IDE Experience
-![Development Environment](assets/ide-view.png)
-*Complete IDE with Monaco editor, file explorer, terminal, and step-by-step guidance*
-
-### Live Preview - Real-time Results
-![Live Preview](assets/live-preview.png)
-*Instant preview of your generated application with WebContainer integration*
-
-## 🏗️ Technical Architecture
-
-### Backend API Server
-- **Express.js**: RESTful API with TypeScript support
-- **Claude AI Integration**: Anthropic's Claude model for code generation
-- **Template Management**: Dynamic project scaffolding system
-- **CORS Enabled**: Cross-origin resource sharing for frontend integration
-
-### Frontend Application
-- **React 18**: Modern functional components with hooks
-- **TypeScript**: Full type safety across the application
-- **Vite**: Lightning-fast development server and build tool
-- **Shadcn/UI**: Beautiful, accessible component library
-- **Tailwind CSS**: Utility-first styling framework
-
-### Core Components
-- **ChatPanel**: AI conversation interface with step tracking
-- **CodeEditor**: Monaco-based editor with advanced features
-- **FileExplorer**: Tree-view file navigation system
-- **PreviewFrame**: WebContainer-powered live preview
-- **Terminal**: Browser-based command execution
-
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
-- Node.js 18+ and npm/yarn
-- Anthropic API key for Claude AI integration
+- Node.js 18+ 
+- **AI Provider Keys** (choose from available providers):
+  - NVIDIA API key (free tier available)
+  - Anthropic Claude API key (premium)
+  - Additional providers supported - see AI Provider Options below
+- **MongoDB Atlas** (optional) - For project persistence and management
 
-### Installation & Setup
+### Installation
 
-1. **Clone and Install Dependencies**
+1. **Clone the repository**
    ```bash
    git clone https://github.com/debashish17/Sitesmith.git
    cd Sitesmith
-   
-   # Install backend dependencies
-   cd backend
-   npm install
-   
-   # Install frontend dependencies
-   cd ../frontend
-   npm install
    ```
 
-2. **Environment Configuration**
+2. **Install dependencies**
    ```bash
-   # In backend directory
-   cp .env.example .env
-   # Add your Anthropic API key:
-   # ANTHROPIC_API_KEY=your_key_here
-   ```
-
-3. **Start Development Servers**
-   ```bash
-   # Terminal 1 - Backend API (Port 3000)
-   cd backend
-   npm run dev
+   # Backend
+   cd backend && npm install
    
-   # Terminal 2 - Frontend App (Port 5173)
-   cd frontend
-   npm run dev
+   # Frontend  
+   cd ../frontend && npm install
    ```
 
-4. **Access the Application**
-   Open `http://localhost:5173` and start building!
+3. **Configure environment**
+   ```bash
+   # Create .env file in backend directory
+   cp backend/.env.example backend/.env
+   
+   # Configure your preferred AI provider:
+   # Set AI_PROVIDER to your chosen provider (nvidia, claude, etc.)
+   # Add the corresponding API key for your selected provider
+   # See AI Provider Options section for detailed setup
+   
+   # Optional: Add MongoDB URI for project persistence
+   # MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/sitesmith
+   ```
 
-## 📋 How It Works
+4. **Start the application**
+   ```bash
+   # Terminal 1 - Backend (port 3000)
+   cd backend && npm run dev
+   
+   # Terminal 2 - Frontend (port 5173)
+   cd frontend && npm run dev
+   ```
 
-### 1. Project Initialization
-- Enter a natural language description of your desired application
-- Claude AI analyzes the prompt and determines the appropriate technology stack
-- System generates initial project structure and configuration files
+5. **Open your browser**
+   Navigate to `http://localhost:5173`
 
-### 2. AI-Guided Development
-- Chat interface provides step-by-step build instructions
-- Each step creates, modifies, or configures specific files
-- Visual progress tracking shows completion status
+## AI Provider Options
 
-### 3. Live Development Environment
-- Monaco editor provides professional-grade code editing
-- WebContainer enables real-time execution and preview
-- Integrated terminal allows package installation and script execution
+SiteSmith supports multiple AI providers to give you flexibility in choosing the best model for your needs:
 
-### 4. Real-time Preview
-- Instant feedback as you modify code
-- Full-stack application preview in the browser
-- Hot reload functionality for rapid iteration
+### Currently Supported Providers
 
-## � Project Structure
+#### NVIDIA API
+- **Model**: Qwen3-Coder-480B-Instruct  
+- **Cost**: Free tier available with rate limits
+- **Best for**: Learning, experimentation, and personal projects
+- **Setup**: Get API key from [build.nvidia.com](https://build.nvidia.com/)
 
-```
-SiteSmith/
-├── assets/                           # Screenshots and media
-│   ├── main-interface.png           # Landing page screenshot
-│   ├── ide-view.png                 # IDE interface screenshot
-│   └── live-preview.png             # Preview functionality screenshot
-│
-├── backend/                          # Node.js Express API
-│   ├── src/
-│   │   ├── index.ts                 # Main server file
-│   │   ├── prompts.ts               # AI system prompts
-│   │   ├── constants.ts             # Application constants
-│   │   ├── stripIndent.ts           # String formatting utilities
-│   │   └── default/                 # Project templates
-│   │       ├── react.ts             # React project template
-│   │       └── node.ts              # Node.js project template
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── .env.example                 # Environment variables template
-│
-├── frontend/                         # React Vite Application
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── ui/                  # Shadcn UI components
-│   │   │   └── workspace/           # IDE components
-│   │   │       ├── ChatPanel.tsx   # AI chat interface
-│   │   │       ├── CodeEditor.tsx  # Monaco editor wrapper
-│   │   │       ├── FileExplorer.tsx # File tree navigation
-│   │   │       ├── PreviewFrame.tsx # WebContainer preview
-│   │   │       ├── TabView.tsx     # Tab switching interface
-│   │   │       └── Terminal.tsx    # Browser terminal
-│   │   ├── pages/
-│   │   │   ├── Chat.tsx            # Landing page
-│   │   │   ├── Workspace.tsx       # Main IDE interface
-│   │   │   └── NotFound.tsx        # 404 error page
-│   │   ├── hooks/
-│   │   │   └── useWebcontainer.ts  # WebContainer integration
-│   │   ├── types/
-│   │   │   └── index.ts            # TypeScript definitions
-│   │   ├── lib/                    # Utility functions
-│   │   ├── config.ts               # App configuration
-│   │   ├── steps.ts                # Step parsing logic
-│   │   └── App.tsx                 # Main app component
-│   ├── components.json             # Shadcn UI configuration
-│   ├── package.json
-│   ├── vite.config.ts
-│   ├── tailwind.config.ts
-│   ├── tsconfig.json
-│   ├── tsconfig.app.json
-│   └── tsconfig.node.json
-│
-├── README.md                        # Project documentation
-└── .gitignore                       # Git ignore rules
-```
+#### Claude AI (Anthropic)
+- **Model**: Claude Sonnet 3.5
+- **Cost**: Pay-per-use API charges
+- **Best for**: Production applications and complex projects  
+- **Setup**: Requires Anthropic API key with billing
 
-## 🛠️ Technology Stack
+### Adding More Providers
 
-### Core Technologies
-- **Frontend**: React 18, TypeScript, Vite
+SiteSmith is designed with an extensible architecture that makes it easy to integrate additional AI providers. Future supported providers may include:
+- OpenAI GPT models
+- Google Gemini
+- Cohere Command
+- Local models via Ollama
+- Custom API endpoints
+
+*Want to request a specific provider? [Open an issue](https://github.com/debashish17/Sitesmith/issues) on our GitHub repository.*
+
+## Project Management
+
+- **Auto-Save**: Projects are automatically saved to MongoDB
+- **Project History**: Track all changes and conversation history
+- **Organization**: Filter projects by status (active, completed, archived)
+- **Collaboration**: Share project URLs with team members
+- **Backup**: All code, files, and AI conversations are preserved
+
+## How It Works
+
+1. **Choose Your AI Provider**: Select from multiple supported AI providers based on your needs
+2. **Describe Your Project**: Tell the AI what you want to build in natural language
+3. **Watch It Generate**: AI creates the complete application structure and code
+4. **Live Development**: Edit code with full IDE features and see instant previews
+5. **Save & Manage**: Projects are automatically saved to MongoDB for future access
+6. **Deploy Instantly**: Applications run directly in the browser via WebContainer
+
+## Technology Stack
+
+- **Frontend**: React, TypeScript, Vite, Tailwind CSS
 - **Backend**: Node.js, Express, TypeScript
-- **AI**: Anthropic Claude (claude-sonnet-4-5)
-- **Runtime**: WebContainer API for browser-based execution
+- **AI Providers**: 
+  - Multiple provider support (NVIDIA, Claude, and more)
+  - Extensible architecture for adding new AI services
+  - Provider-specific optimizations and model selection
+- **Database**: MongoDB Atlas for project persistence
+- **Runtime**: WebContainer for browser-based execution
+- **Editor**: Monaco Editor (VS Code engine)
 
-### UI & Styling
-- **Component Library**: Shadcn/UI with Radix UI primitives
-- **Styling**: Tailwind CSS with custom glass morphism effects
-- **Icons**: Lucide React icon library
-- **Editor**: Monaco Editor (VS Code's editor)
+## Use Cases
 
-### Development Tools
-- **State Management**: React hooks and context
-- **HTTP Client**: Axios for API communication
-- **Routing**: React Router for navigation
-- **Build Tool**: Vite for fast development and building
+- **Rapid prototyping and MVP development** with flexible AI provider options
+- **Learning web development concepts** with access to different AI models
+- **Code generation and boilerplate creation** using cutting-edge language models
+- **Educational coding environment** with project history and management
+- **Quick proof-of-concept applications** with persistent project storage
+- **Team collaboration** with shareable project links and version history
+- **Cost optimization** by choosing the most suitable AI provider for each project
 
-## 🎯 Use Cases
+## Contributing
 
-- **Rapid Prototyping**: Quickly generate functional web applications
-- **Learning Tool**: Understand project structure and best practices
-- **Code Generation**: AI-assisted development workflow
-- **Educational Platform**: Interactive coding environment
-- **Template Creation**: Generate boilerplate code for common patterns
+We welcome contributions! Please feel free to submit a Pull Request.
 
-## 🤝 Contributing
+## License
 
-We welcome contributions! Here's how you can help:
+MIT License - see [LICENSE](LICENSE) file for details.
 
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
+## Links
 
-### Development Guidelines
-- Follow TypeScript best practices
-- Maintain component modularity
-- Write descriptive commit messages
-- Test changes thoroughly before submitting
-
-## � License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## � Links
-
-- **Repository**: [GitHub](https://github.com/debashish17/Sitesmith)
-- **Issues**: [Bug Reports & Feature Requests](https://github.com/debashish17/Sitesmith/issues)
-- **Discussions**: [Community Forum](https://github.com/debashish17/Sitesmith/discussions)
+- [Repository](https://github.com/debashish17/Sitesmith)
+- [Issues](https://github.com/debashish17/Sitesmith/issues)
 
 ---
 
-**Built with ❤️ for developers who love AI-powered productivity**
+Built for developers who love AI-powered productivity
