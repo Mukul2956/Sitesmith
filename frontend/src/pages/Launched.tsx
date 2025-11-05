@@ -152,8 +152,10 @@ const Launched: React.FC = () => {
               SiteSmith is open source! Contribute to the project, report issues, or request features on GitHub.
             </p>
             <button className="bg-white text-gray-900 px-6 py-3 rounded-lg hover:bg-gray-100 transition-colors font-medium w-full flex items-center gap-2 justify-center">
-              <Github className="w-5 h-5" />
-              View on GitHub
+              <a href="https://github.com/Mukul2956/Sitesmith" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 justify-center w-full h-full">
+                <Github className="w-5 h-5" />
+                View on GitHub
+              </a>
             </button>
           </div>
 

@@ -49,7 +49,7 @@ const Community: React.FC = () => {
               Contribute to the open-source project, report issues, and request new features.
             </p>
             <button className="bg-white text-gray-900 px-6 py-3 rounded-lg hover:bg-gray-100 transition-colors font-medium">
-              Visit Repository
+              <a href="https://github.com/Mukul2956/Sitesmith" target="_blank" rel="noopener noreferrer" className="block w-full h-full">Visit Repository</a>
             </button>
           </div>
 
@@ -87,7 +87,10 @@ const Community: React.FC = () => {
             <p className="text-white/70 mb-6">
               Show off your amazing projects built with SiteSmith and get inspired by others.
             </p>
-            <button className="bg-white text-gray-900 px-6 py-3 rounded-lg hover:bg-gray-100 transition-colors font-medium">
+            <button 
+              className="bg-white text-gray-900 px-6 py-3 rounded-lg hover:bg-gray-100 transition-colors font-medium"
+              onClick={() => navigate('/', { state: { scrollTo: 'recent-projects' } })}
+            >
               View Showcase
             </button>
           </div>

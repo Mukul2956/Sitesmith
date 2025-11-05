@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Send, Zap, Brain, Folder, Calendar, User, Eye, Plus } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { projectService, Project } from '../services/projectService';
@@ -7,8 +7,34 @@ import Navigation from '@/components/Navigation';
 
 export type AIProvider = 'nvidia' | 'claude';
 
+interface LocationState {
+  scrollTo?: string;
+  initialPrompt?: string;
+  provider?: AIProvider;
+}
+
 export function Home() {
   const navigate = useNavigate();
+  const location = useLocation();
+  
+  // Scroll to recent projects if navigation state requests it
+  useEffect(() => {
+    const state = location.state as LocationState;
+    if (state && state.scrollTo === 'recent-projects') {
+      // Small delay to ensure the component is fully rendered
+      const timer = setTimeout(() => {
+        const element = document.getElementById('recent-projects');
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 100);
+      
+      // Clear the state to prevent scrolling on refresh
+      navigate('/', { replace: true });
+      
+      return () => clearTimeout(timer);
+    }
+  }, [location.state, navigate]);
   const [prompt, setMessage] = useState('');
   const [provider, setProvider] = useState<AIProvider>('nvidia');
   const [projects, setProjects] = useState<Project[]>([]);
@@ -157,7 +183,7 @@ export function Home() {
         </div>
 
         {/* Recent Projects Section */}
-        <div className="w-[95%] max-w-none px-4 pb-16">
+  <div id="recent-projects" className="w-[95%] max-w-none px-4 pb-16">
           <div className="bg-black backdrop-blur-sm border border-white/10 rounded-2xl p-8">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-white">Recent Projects</h2>
