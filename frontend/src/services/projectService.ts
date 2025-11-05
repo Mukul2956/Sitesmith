@@ -1,6 +1,22 @@
-import axios from 'axios';
-
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+
+// Helper function for fetch requests
+async function fetchWithErrorHandling(url: string, options: RequestInit = {}): Promise<any> {
+  const response = await fetch(url, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+    ...options,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ message: 'Request failed' }));
+    throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+  }
+
+  return response.json();
+}
 
 export interface ProjectFile {
   path: string;
@@ -71,8 +87,10 @@ export interface ProjectResponse {
 export const projectService = {
   // Create a new project
   async createProject(data: CreateProjectData): Promise<ProjectResponse> {
-    const response = await axios.post(`${BACKEND_URL}/api/projects`, data);
-    return response.data;
+    return fetchWithErrorHandling(`${BACKEND_URL}/api/projects`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 
   // Get all projects
@@ -82,38 +100,43 @@ export const projectService = {
     params.append('page', page.toString());
     params.append('limit', limit.toString());
 
-    const response = await axios.get(`${BACKEND_URL}/api/projects?${params}`);
-    return response.data;
+    return fetchWithErrorHandling(`${BACKEND_URL}/api/projects?${params}`);
   },
 
   // Get a specific project
   async getProject(id: string): Promise<ProjectResponse> {
-    const response = await axios.get(`${BACKEND_URL}/api/projects/${id}`);
-    return response.data;
+    return fetchWithErrorHandling(`${BACKEND_URL}/api/projects/${id}`);
   },
 
   // Update project
   async updateProject(id: string, data: Partial<Project>): Promise<ProjectResponse> {
-    const response = await axios.put(`${BACKEND_URL}/api/projects/${id}`, data);
-    return response.data;
+    return fetchWithErrorHandling(`${BACKEND_URL}/api/projects/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
   },
 
   // Delete project
   async deleteProject(id: string): Promise<{ success: boolean; message: string }> {
-    const response = await axios.delete(`${BACKEND_URL}/api/projects/${id}`);
-    return response.data;
+    return fetchWithErrorHandling(`${BACKEND_URL}/api/projects/${id}`, {
+      method: 'DELETE',
+    });
   },
 
   // Add file to project
   async addFileToProject(id: string, file: { path: string; content: string; type?: 'file' | 'folder' }) {
-    const response = await axios.post(`${BACKEND_URL}/api/projects/${id}/files`, file);
-    return response.data;
+    return fetchWithErrorHandling(`${BACKEND_URL}/api/projects/${id}/files`, {
+      method: 'POST',
+      body: JSON.stringify(file),
+    });
   },
 
   // Add conversation message
   async addConversationMessage(id: string, message: { role: 'user' | 'assistant'; content: string }) {
-    const response = await axios.post(`${BACKEND_URL}/api/projects/${id}/conversation`, message);
-    return response.data;
+    return fetchWithErrorHandling(`${BACKEND_URL}/api/projects/${id}/conversation`, {
+      method: 'POST',
+      body: JSON.stringify(message),
+    });
   },
 
   // Update project status

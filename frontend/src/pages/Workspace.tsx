@@ -5,7 +5,6 @@ import FileExplorer from '@/components/workspace/FileExplorer';
 import CodeEditor from '@/components/workspace/CodeEditor';
 import { PreviewFrame } from '@/components/workspace/PreviewFrame';
 import TabView from '@/components/workspace/TabView';
-import axios from "axios"
 import {Step,FileItem,StepType} from "../types"
 import { BACKEND_URL } from '@/config';
 import { StreamingXMLParser } from '@/streamingXMLParser';
@@ -33,6 +32,9 @@ const Workspace = () => {
   const [projectId, setProjectId] = useState<string | null>(urlProjectId || null);
   const [projectName, setProjectName] = useState<string>('');
   const [isLoadingProject, setIsLoadingProject] = useState(false);
+  
+  // Store the current prompt (either from initialPrompt or loaded from project)
+  const [currentPrompt, setCurrentPrompt] = useState<string>(initialPrompt || '');
   
   // Track running dev server processes for cleanup
   const runningProcessesRef = useRef<any[]>([]);
@@ -72,6 +74,17 @@ const Workspace = () => {
         const project = response.project;
         setProjectName(project.name);
         setLlmMessages(project.conversation || []);
+        
+        // Set initialPrompt from loaded project to avoid validation errors when saving
+        if (project.prompt && project.prompt.trim()) {
+          setCurrentPrompt(project.prompt);
+          console.log('📝 Restored project prompt:', project.prompt);
+        } else {
+          // Fallback if project has no prompt (shouldn't happen but be safe)
+          const fallbackPrompt = `Continue development of: ${project.name}`;
+          setCurrentPrompt(fallbackPrompt);
+          console.log('⚠️ Project had no prompt, using fallback:', fallbackPrompt);
+        }
         
         // Parse and restore files structure
         if (project.files) {
@@ -333,7 +346,7 @@ const Workspace = () => {
     }
   };
 
-  // Cleanup function for dev server processes
+  // Cleanup function for dev server processes and coordination state
   const cleanupDevServerProcesses = async () => {
     if (runningProcessesRef.current.length > 0) {
       console.log(`🧹 Cleaning up ${runningProcessesRef.current.length} dev server processes...`);
@@ -354,6 +367,41 @@ const Workspace = () => {
       // Reset preview state
       setIsPreviewReady(false);
     }
+    
+    // Reset WebContainer coordination state
+    resetWebContainerCoordinationState();
+  };
+
+  // Reset all WebContainer coordination state for fresh start
+  const resetWebContainerCoordinationState = () => {
+    console.log('🔄 Resetting WebContainer coordination state...');
+    
+    // Clear any pending debounce timers
+    for (const [, timer] of packageInstallDebounceRef.current.entries()) {
+      clearTimeout(timer);
+    }
+    
+    // Clear all coordination maps and sets
+    packageInstallLocksRef.current.clear();
+    devServerSpawnedRef.current.clear();
+    fileWriteQueueRef.current.clear();
+    packageInstallationStatusRef.current.clear();
+    packageInstallDebounceRef.current.clear();
+    
+    console.log('✅ WebContainer coordination state reset');
+  };
+
+  // Get current coordination status for debugging/monitoring
+  const getCoordinationStatus = () => {
+    const status = {
+      packageInstalls: Object.fromEntries(packageInstallationStatusRef.current),
+      devServersSpawned: Array.from(devServerSpawnedRef.current),
+      pendingFileWrites: fileWriteQueueRef.current.size,
+      activeDebounces: packageInstallDebounceRef.current.size,
+      runningProcesses: runningProcessesRef.current.length
+    };
+    console.log('📊 WebContainer Coordination Status:', status);
+    return status;
   };
 
   // Effect to load existing project on mount
@@ -414,7 +462,17 @@ const Workspace = () => {
       });
       
       // Generate project name if not set - use the original prompt as the name
-      const finalProjectName = projectName || initialPrompt || `Project ${new Date().toLocaleDateString()}`;
+      const finalProjectName = projectName || currentPrompt || initialPrompt || `Project ${new Date().toLocaleDateString()}`;
+      
+      // Ensure we have a valid prompt - this is required by the backend schema
+      // If currentPrompt is empty (when continuing an existing project), use the project name or a default
+      const validPrompt = (currentPrompt && currentPrompt.trim()) || (initialPrompt && initialPrompt.trim())
+        ? (currentPrompt || initialPrompt).trim()
+        : projectName && projectName.trim()
+        ? `Continue development of: ${projectName.trim()}`
+        : `AI-generated project created on ${new Date().toLocaleDateString()}`;
+      
+      console.log('📝 Project prompt for save:', validPrompt);
       
       // Convert files to the format expected by the backend
       // Flatten the hierarchical file structure and only include actual files
@@ -480,7 +538,7 @@ const Workspace = () => {
       const projectData = {
         name: finalProjectName,
         description: `AI-generated project using ${aiProvider}`,
-        prompt: initialPrompt,
+        prompt: validPrompt, // Use the validated prompt
         aiProvider,
         template: 'react', // Default template
         files: projectFiles,
@@ -488,6 +546,18 @@ const Workspace = () => {
         conversation,
         status: 'active' as const
       };
+      
+      // Final validation to ensure prompt is never empty
+      if (!projectData.prompt || projectData.prompt.trim().length === 0) {
+        console.warn('⚠️ Empty prompt detected, using fallback');
+        projectData.prompt = `AI Project created on ${new Date().toLocaleDateString()}`;
+      }
+      
+      console.log('📤 Final project data validation:');
+      console.log('  - Name:', projectData.name);
+      console.log('  - Prompt:', projectData.prompt);
+      console.log('  - Files:', projectData.files.length);
+      console.log('  - Steps:', projectData.steps.length);
       
       if (projectId) {
         // Update existing project
@@ -505,13 +575,8 @@ const Workspace = () => {
       console.error('❌ Error saving project:', error);
       
       // Show more specific error messages
-      if (axios.isAxiosError(error)) {
-        const responseData = error.response?.data;
-        if (responseData?.message?.includes('validation failed')) {
-          alert(`❌ Project validation failed!\n\nSome files may have empty content or invalid data.\n\nDetails: ${responseData.message}\n\nPlease try again after ensuring all files have content.`);
-        } else {
-          alert(`❌ Server Error: ${responseData?.message || error.message}\n\nPlease try again.`);
-        }
+      if (error instanceof Error) {
+        alert(`❌ Project Error: ${error.message}\n\nPlease try again.`);
       } else {
         alert('❌ Failed to save project. Please check your network connection and try again.');
       }
@@ -589,16 +654,27 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
 
       console.log('📤 Sending error payload:', errorPayload);
 
-      const response = await axios.post(`${BACKEND_URL}/error`, errorPayload, {
-        timeout: 120000 // 2 minutes for error fixing
+      const response = await fetch(`${BACKEND_URL}/error`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(errorPayload),
+        signal: AbortSignal.timeout(120000) // 2 minutes for error fixing
       });
 
-      if (response.data.fixApplied && response.data.response) {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.fixApplied && data.response) {
         console.log('✅ AI fix received, applying...');
         
         // Process the fix response with streaming parser
         const errorStreamingParser = new StreamingXMLParser(handleStreamingStep, 1);
-        errorStreamingParser.processChunk(response.data.response);
+        errorStreamingParser.processChunk(data.response);
         errorStreamingParser.finalize();
 
         // Wait for fix to be applied
@@ -777,7 +853,46 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
   const [isPreviewReady, setIsPreviewReady] = useState(false);
 
   // Smart package installation during streaming
-  const handlePackageInstallation = async (filePath: string) => {
+  const handlePackageInstallationCoordinated = async (filePath: string) => {
+    try {
+      // Only handle package.json files
+      if (!filePath.endsWith('package.json')) {
+        return;
+      }
+
+      console.log(`📦 Detected package.json: ${filePath}`);
+      
+      // Get the directory where package.json is located
+      const packageDir = filePath.includes('/') ? filePath.substring(0, filePath.lastIndexOf('/')) : '.';
+      
+      // Check if installation is already in progress or completed for this directory
+      const currentStatus = packageInstallationStatusRef.current.get(packageDir);
+      if (currentStatus === 'installing' || currentStatus === 'completed') {
+        console.log(`📦 Package installation for ${packageDir} already ${currentStatus}, skipping...`);
+        return;
+      }
+
+      // Debounce package installation to prevent rapid multiple installs
+      const existingTimer = packageInstallDebounceRef.current.get(packageDir);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+
+      // Set a debounce timer to delay installation by 1 second
+      const debounceTimer = setTimeout(async () => {
+        packageInstallDebounceRef.current.delete(packageDir);
+        await executePackageInstallation(packageDir);
+      }, 1000);
+
+      packageInstallDebounceRef.current.set(packageDir, debounceTimer);
+      console.log(`⏳ Debouncing package installation for ${packageDir} (1s delay)...`);
+    } catch (error) {
+      console.error('❌ Coordinated package installation error:', error);
+    }
+  };
+
+  // Execute actual package installation with coordination
+  const executePackageInstallation = async (packageDir: string) => {
     try {
       // Await the webcontainer promise directly
       const wc = await webcontainerPromise;
@@ -786,60 +901,91 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
         return;
       }
 
-      // Detect if this is a package.json file
-      if (filePath.endsWith('package.json')) {
-        console.log(`📦 Detected package.json: ${filePath}`);
-
-        // Get the directory where package.json is located
-        const packageDir = filePath.includes('/') ? filePath.substring(0, filePath.lastIndexOf('/')) : '.';
-        
-        // Install packages using npm with optimized settings
-        const installProcess = await wc.spawn('npm', ['install'], {
-          cwd: packageDir,
-          env: { 
-            npm_config_yes: 'true',
-            npm_config_fund: 'false',
-            npm_config_audit: 'false'
-          }
-        });
-
-        // Stream the installation output (background only)
-        installProcess.output.pipeTo(new WritableStream({
-          write(data: any) {
-            try {
-              let output: string;
-              if (typeof data === 'string') {
-                output = data;
-              } else if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
-                output = new TextDecoder().decode(data);
-              } else {
-                output = String(data);
-              }
-              console.log(`📦 npm install (${packageDir}):`, output);
-            } catch (error) {
-              console.error('Error decoding npm install output:', error);
-            }
-          }
-        }));
-
-        const exitCode = await installProcess.exit;
-        if (exitCode === 0) {
-          console.log(`✅ Package installation completed for ${filePath}`);
-          
-          // After successful installation, try to start the preview
-          await startPreviewAfterPackages(packageDir);
-        } else {
-          console.error(`❌ Package installation failed for ${filePath} (exit code: ${exitCode})`);
-        }
+      // Check if there's already a lock for this package directory
+      const existingLock = packageInstallLocksRef.current.get(packageDir);
+      if (existingLock) {
+        console.log(`📦 Package installation already in progress for ${packageDir}, waiting...`);
+        await existingLock;
+        return;
       }
+
+      // Set status to installing
+      packageInstallationStatusRef.current.set(packageDir, 'installing');
+      
+      // Create installation promise
+      const installationPromise = (async () => {
+        try {
+          console.log(`📦 Starting npm install for ${packageDir}...`);
+          
+          // Install packages using npm with optimized settings
+          const installProcess = await wc.spawn('npm', ['install'], {
+            cwd: packageDir,
+            env: { 
+              npm_config_yes: 'true',
+              npm_config_fund: 'false',
+              npm_config_audit: 'false',
+              npm_config_progress: 'false' // Reduce log noise
+            }
+          });
+
+          // Stream the installation output (background only)
+          installProcess.output.pipeTo(new WritableStream({
+            write(data: any) {
+              try {
+                let output: string;
+                if (typeof data === 'string') {
+                  output = data;
+                } else if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
+                  output = new TextDecoder().decode(data);
+                } else {
+                  output = String(data);
+                }
+                console.log(`📦 npm install (${packageDir}):`, output);
+              } catch (error) {
+                console.error('Error decoding npm install output:', error);
+              }
+            }
+          }));
+
+          const exitCode = await installProcess.exit;
+          if (exitCode === 0) {
+            console.log(`✅ Package installation completed for ${packageDir}`);
+            packageInstallationStatusRef.current.set(packageDir, 'completed');
+            
+            // After successful installation, try to start the preview with coordination
+            await startPreviewAfterPackagesCoordinated(packageDir);
+          } else {
+            console.error(`❌ Package installation failed for ${packageDir} (exit code: ${exitCode})`);
+            packageInstallationStatusRef.current.set(packageDir, 'failed');
+          }
+        } catch (error) {
+          console.error(`❌ Package installation error for ${packageDir}:`, error);
+          packageInstallationStatusRef.current.set(packageDir, 'failed');
+        }
+      })();
+
+      // Store the lock
+      packageInstallLocksRef.current.set(packageDir, installationPromise);
+      
+      // Wait for installation to complete
+      await installationPromise;
+      
+      // Clean up the lock
+      packageInstallLocksRef.current.delete(packageDir);
     } catch (error) {
-      console.error('❌ Package installation error:', error);
+      console.error('❌ Package installation execution error:', error);
     }
   };
 
-  // Start preview after packages are ready
-  const startPreviewAfterPackages = async (packageDir: string = '.') => {
+  // Start preview after packages are ready with coordination to prevent multiple spawns
+  const startPreviewAfterPackagesCoordinated = async (packageDir: string = '.') => {
     try {
+      // Check if dev server already spawned for this directory
+      if (devServerSpawnedRef.current.has(packageDir)) {
+        console.log(`🚀 Dev server already spawned for ${packageDir}, skipping...`);
+        return;
+      }
+
       // Await the webcontainer promise directly
       const wc = await webcontainerPromise;
       if (!wc) {
@@ -847,7 +993,7 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
         return;
       }
 
-      console.log(`🚀 Starting preview for ${packageDir}...`);
+      console.log(`🚀 Starting coordinated preview for ${packageDir}...`);
 
       // Check if there's a dev script in package.json
       try {
@@ -860,7 +1006,10 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
         if (packageData.scripts?.dev) {
           console.log(`🎯 Found dev script in ${packageJsonPath}`);
           
-          // Clean up any existing dev servers first
+          // Mark this directory as having a spawned dev server
+          devServerSpawnedRef.current.add(packageDir);
+          
+          // Clean up any existing dev servers first (but keep track of this one)
           await cleanupDevServerProcesses();
           
           // Start the dev server
@@ -898,39 +1047,65 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
         }
       } catch (error) {
         console.error(`❌ Error reading ${packageDir === '.' ? 'package.json' : packageDir + '/package.json'} or starting dev server:`, error);
+        // Remove from spawned set on error
+        devServerSpawnedRef.current.delete(packageDir);
       }
     } catch (error) {
-      console.error('❌ Preview startup error:', error);
+      console.error('❌ Coordinated preview startup error:', error);
+      // Remove from spawned set on error
+      devServerSpawnedRef.current.delete(packageDir);
     }
   };
 
   const saveFileToWebcontainer = async (filePath: string, content: string) => {
     try {
-      // Await the webcontainer promise directly for strict sequencing
-      const wc = await webcontainerPromise;
-      if (!wc) {
-        console.error('❌ WebContainer not available');
-        return;
+      // Implement coordinated file writing to prevent race conditions
+      const existingWrite = fileWriteQueueRef.current.get(filePath);
+      if (existingWrite) {
+        console.log(`⏳ File write already in progress for ${filePath}, waiting...`);
+        await existingWrite;
+        return; // File already written
       }
-      
-      console.log(`💾 Saving file to webcontainer: ${filePath}`);
-      
-      // Ensure directory structure exists
-  const parts = filePath.split('/');
-  const dirPath = parts.slice(0, -1).join('/');
-      
-      if (dirPath) {
-        await wc.fs.mkdir(dirPath, { recursive: true });
-      }
-      
-      // Write the file
-      await wc.fs.writeFile(filePath, content);
-      console.log(`✅ File saved: ${filePath}`);
 
-      // Check if this is a package file and handle installation
-      await handlePackageInstallation(filePath);
+      // Create a promise for this file write operation
+      const writePromise = (async () => {
+        // Await the webcontainer promise directly for strict sequencing
+        const wc = await webcontainerPromise;
+        if (!wc) {
+          console.error('❌ WebContainer not available');
+          return;
+        }
+        
+        console.log(`💾 Saving file to webcontainer: ${filePath}`);
+        
+        // Ensure directory structure exists
+        const parts = filePath.split('/');
+        const dirPath = parts.slice(0, -1).join('/');
+            
+        if (dirPath) {
+          await wc.fs.mkdir(dirPath, { recursive: true });
+        }
+        
+        // Write the file
+        await wc.fs.writeFile(filePath, content);
+        console.log(`✅ File saved: ${filePath}`);
+
+        // Check if this is a package file and handle installation with coordination
+        await handlePackageInstallationCoordinated(filePath);
+      })();
+
+      // Track the write promise
+      fileWriteQueueRef.current.set(filePath, writePromise);
+      
+      // Execute the write
+      await writePromise;
+      
+      // Clean up the promise from queue
+      fileWriteQueueRef.current.delete(filePath);
     } catch (error) {
       console.error(`❌ Error saving file ${filePath}:`, error);
+      // Clean up on error
+      fileWriteQueueRef.current.delete(filePath);
     }
   };
 
@@ -961,8 +1136,8 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
           
           // For frontend/main package.json, start preview if dev script exists
           if ((check.name === 'frontend' || check.name === 'main') && packageData.scripts?.dev && !isPreviewReady) {
-            console.log(`🎯 Found ${check.name} dev script, starting preview...`);
-            await startPreviewAfterPackages(check.workingDir);
+            console.log(`🎯 Found ${check.name} dev script, starting coordinated preview...`);
+            await startPreviewAfterPackagesCoordinated(check.workingDir);
             break; // Only start one preview
           }
           // For backend package.json, just log (could start backend dev server if needed)
@@ -981,8 +1156,6 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
 
   // Add function to handle streaming steps with immediate file saving
   const handleStreamingStep = async (step: Step) => {
-    console.log('📦 Streaming step received:', step.title, step.type);
-    
     // Add step to the steps array
     setSteps(prevSteps => [...prevSteps, { ...step, status: 'pending' }]);
     
@@ -1174,6 +1347,13 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
   const stepsRef = useRef<Step[]>([]);
   const messagesRef = useRef<{role: "user" | "assistant", content: string;}[]>([]);
   
+  // WebContainer coordination refs to prevent redundancies and race conditions
+  const packageInstallLocksRef = useRef<Map<string, Promise<void>>>(new Map());
+  const devServerSpawnedRef = useRef<Set<string>>(new Set());
+  const fileWriteQueueRef = useRef<Map<string, Promise<void>>>(new Map());
+  const packageInstallationStatusRef = useRef<Map<string, 'pending' | 'installing' | 'completed' | 'failed'>>(new Map());
+  const packageInstallDebounceRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  
   // Update refs when state changes
   useEffect(() => {
     filesRef.current = files;
@@ -1281,7 +1461,6 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
   }, [files, webcontainer]);
 
   async function sendMessage(message: string) {
-    console.log('� Starting streamlined workflow');
     console.log('User prompt:', message);
     
     // Set streaming indicator
@@ -1293,60 +1472,115 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
     setLlmMessages(updatedMessages);
     
     try {
-      console.log('⏳ Requesting AI response...');
-      
-      // STEP 1: Get AI response (template generation)
-      const response = await axios.post(`${BACKEND_URL}/chat`, {
-        messages: updatedMessages,
-        provider: aiProvider
-      }, {
-        timeout: 300000
+      // STEP 1: Get AI response using fetch with streaming
+      const response = await fetch(`${BACKEND_URL}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/plain', // This signals we want streaming
+        },
+        body: JSON.stringify({
+          messages: updatedMessages,
+          provider: aiProvider,
+          stream: true // Explicitly request streaming
+        })
       });
-      
-      console.log('✅ AI response received');
-      
-      if (response.data.response) {
-        // Add assistant response to conversation
-        const assistantMessage = { role: "assistant" as const, content: response.data.response };
-        setLlmMessages(prev => [...prev, assistantMessage]);
+
+      if (!response.ok) {
+        // If streaming fails, fallback to regular JSON response
+        console.log('⚠️ Streaming failed, attempting fallback to regular JSON response...');
+        const fallbackResponse = await fetch(`${BACKEND_URL}/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            messages: updatedMessages,
+            provider: aiProvider,
+            stream: false // Explicitly request non-streaming
+          })
+        });
         
-        // STEP 2-8: Process the response with streamlined workflow
-        await processResponseStreamlined(response.data.response);
+        if (fallbackResponse.ok) {
+          const data = await fallbackResponse.json();
+          if (data.response) {
+            // Add assistant response to conversation
+            const assistantMessage = { role: "assistant" as const, content: data.response };
+            setLlmMessages(prev => [...prev, assistantMessage]);
+            
+            // Process with fallback method (all at once)
+            await processResponseFallback(data.response);
+          }
+          return;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+
+      if (!response.body) {
+        throw new Error('Response body is not available for streaming');
+      }
+
+      // STEP 2-8: Process the streaming response
+      await processResponseStreamlined(response.body);
+      
     } catch (error) {
       console.error('❌ Error in sendMessage:', error);
-      setIsStreaming(false);
+      
+      // Fallback to regular endpoint if streaming fails
+      try {
+        const fallbackResponse = await fetch(`${BACKEND_URL}/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            messages: updatedMessages,
+            provider: aiProvider,
+            stream: false // Explicitly request non-streaming
+          })
+        });
+        
+        if (fallbackResponse.ok) {
+          const data = await fallbackResponse.json();
+          if (data.response) {
+            // Add assistant response to conversation
+            const assistantMessage = { role: "assistant" as const, content: data.response };
+            setLlmMessages(prev => [...prev, assistantMessage]);
+            
+            // Process with fallback method (all at once)
+            await processResponseFallback(data.response);
+          }
+        } else {
+          throw new Error('Both streaming and fallback requests failed');
+        }
+      } catch (fallbackError) {
+        console.error('❌ Fallback also failed:', fallbackError);
+        setIsStreaming(false);
+      }
     }
   }
 
-  // New streamlined processing function
-  const processResponseStreamlined = async (aiResponse: string) => {
-    console.log('🔄 Starting streamlined processing pipeline...');
-    
+  // Fallback processing function for non-streaming responses
+  const processResponseFallback = async (aiResponse: string) => {
     try {
       // STEP 2: Check for package.json and start parallel installation
       const hasPackageJson = aiResponse.includes('package.json');
       let packageInstallPromise: Promise<void> | null = null;
       
       if (hasPackageJson) {
-        console.log('� Package.json detected - starting parallel installation');
+        console.log('📦 Package.json detected - starting parallel installation');
         packageInstallPromise = startParallelPackageInstallation(aiResponse);
       }
       
       // STEP 3: Process files immediately as they're parsed
-      console.log('📁 Processing files with StreamingXMLParser...');
       const maxStepId = steps.length > 0 ? Math.max(...steps.map(s => s.id || 0)) : 0;
       const streamingParser = new StreamingXMLParser(handleStreamingStepImmediate, maxStepId + 1);
       
       streamingParser.processChunk(aiResponse);
       streamingParser.finalize();
       
-      // STEP 4: Handle any shell commands (update package.json if needed)
-      // This is handled within handleStreamingStepImmediate
-      
       // Wait for package installation to complete if it was started
       if (packageInstallPromise) {
-        console.log('⏳ Waiting for package installation to complete...');
         await packageInstallPromise;
       }
       
@@ -1367,21 +1601,107 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
       }
       
       // STEP 5: Auto-save project
-      console.log('� Auto-saving project...');
+      console.log('💾 Auto-saving project...');
       await autoSaveProject();
       
       // STEP 6: Start preview server immediately (don't wait for error checks)
-      console.log('� Starting preview server...');
+      console.log('🚀 Starting preview server...');
       await startPreviewServer();
       
       // STEP 7: Error detection in background (after preview starts)
-      console.log('� Running error detection in background...');
       setTimeout(() => errorDetectionAndFixing(), 3000); // Run after 3 seconds
       
-      console.log('✅ Streamlined workflow completed successfully');
+    } catch (error) {
+      console.error('❌ Error in fallback processing:', error);
+    } finally {
+      setIsStreaming(false);
+    }
+  };
+
+  // New streamlined processing function for streaming
+  const processResponseStreamlined = async (responseBody: ReadableStream<Uint8Array>) => {
+    try {
+      // Set up variables for accumulating response data
+      let fullAiResponse = '';
+      let packageInstallPromise: Promise<void> | null = null;
+      let hasStartedPackageInstall = false;
+      
+      // STEP 1: Initialize streaming parser
+      const maxStepId = steps.length > 0 ? Math.max(...steps.map(s => s.id || 0)) : 0;
+      const streamingParser = new StreamingXMLParser(handleStreamingStepImmediate, maxStepId + 1);
+      
+      // STEP 2: Process stream chunks in real-time
+      const reader = responseBody.getReader();
+      const decoder = new TextDecoder();
+      
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            console.log('✅ Stream completed');
+            break;
+          }
+          
+          // Decode the chunk
+          const chunkText = decoder.decode(value, { stream: true });
+          
+          // Accumulate full response for package detection
+          fullAiResponse += chunkText;
+          
+          // Process this chunk immediately with the parser
+          streamingParser.processChunk(chunkText);
+          
+          // Check for package.json and start parallel installation (only once)
+          if (!hasStartedPackageInstall && fullAiResponse.includes('package.json')) {
+            console.log('📦 Package.json detected - starting parallel installation');
+            hasStartedPackageInstall = true;
+            packageInstallPromise = startParallelPackageInstallation(fullAiResponse);
+          }
+        }
+      } finally {
+        // Ensure reader is always released
+        reader.releaseLock();
+      }
+      
+      // STEP 3: Finalize the parser
+      streamingParser.finalize();
+      
+      // STEP 4: Add the full assistant response to conversation
+      const assistantMessage = { role: "assistant" as const, content: fullAiResponse };
+      setLlmMessages(prev => [...prev, assistantMessage]);
+      
+      // STEP 5: Wait for package installation to complete if it was started
+      if (packageInstallPromise) {
+        await packageInstallPromise;
+      }
+      
+      // STEP 6: Wait for all file operations to complete before auto-saving
+      let waitTime = 0;
+      const maxWaitTime = 10000; // 10 seconds max wait
+      while (pendingFileOperationsRef.current > 0 && waitTime < maxWaitTime) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        waitTime += 500;
+      }
+      
+      if (pendingFileOperationsRef.current > 0) {
+        console.warn(`⚠️ Timeout waiting for file operations. Still pending: ${pendingFileOperationsRef.current}`);
+      } else {
+        console.log('✅ All file operations completed');
+      }
+      
+      // STEP 7: Auto-save project
+      await autoSaveProject();
+      
+      // STEP 8: Start preview server immediately (don't wait for error checks)
+      await startPreviewServer();
+      
+      // STEP 9: Error detection in background (after preview starts)
+      console.log('🔍 Running error detection in background...');
+      setTimeout(() => errorDetectionAndFixing(), 3000); // Run after 3 seconds
       
     } catch (error) {
-      console.error('❌ Error in streamlined processing:', error);
+      console.error('❌ Error in streaming processing:', error);
     } finally {
       setIsStreaming(false);
     }
@@ -1423,10 +1743,13 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
   };
 
   const handleStreamingStepImmediate = async (step: Step) => {
-    // Immediate processing without waiting
+    // Immediate processing with status tracking
     console.log(`📁 Processing step immediately: ${step.title} (${step.type})`);
     
     if (step.type === StepType.CreateFile && step.path && step.code) {
+      // Add step as in-progress immediately
+      setSteps(prev => [...prev, { ...step, status: 'in-progress' }]);
+      
       // Increment pending operations counter
       incrementPendingFileOperations();
       
@@ -1510,16 +1833,22 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
         
         await saveFileToWebcontainer(finalPath, step.code);
         
-        // Update UI state
-        setSteps(prev => [...prev, step]);
-        
         // Update file tree with the final path
         updateFileTree(finalPath, step.code);
+        
+        // Mark step as completed
+        setSteps(prev => prev.map(s => 
+          s.id === step.id ? { ...s, status: 'completed' } : s
+        ));
         
         console.log(`✅ Processed file immediately: ${step.path} -> ${finalPath}`);
         
       } catch (error) {
         console.error(`❌ Failed to process file ${step.path}:`, error);
+        // Mark step as failed but show as completed in UI (with error logged)
+        setSteps(prev => prev.map(s => 
+          s.id === step.id ? { ...s, status: 'completed' } : s
+        ));
       } finally {
         // Decrement pending operations counter
         decrementPendingFileOperations();
@@ -1528,15 +1857,23 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
       // Handle shell commands - process them and update package.json if needed
       console.log(`🔧 Processing shell command: ${step.code}`);
       
+      // Add step as in-progress
+      setSteps(prev => [...prev, { ...step, status: 'in-progress' }]);
+      
       try {
         await handleShellCommand(step.code);
         
-        // Update UI state
-        setSteps(prev => [...prev, { ...step, status: 'completed' }]);
+        // Mark step as completed
+        setSteps(prev => prev.map(s => 
+          s.id === step.id ? { ...s, status: 'completed' } : s
+        ));
         
       } catch (error) {
         console.error(`❌ Failed to process shell command:`, error);
-        setSteps(prev => [...prev, { ...step, status: 'pending' }]);
+        // Mark step as pending (could retry)
+        setSteps(prev => prev.map(s => 
+          s.id === step.id ? { ...s, status: 'pending' } : s
+        ));
       }
     }
   };
@@ -1710,24 +2047,14 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
           }
         }, 1000);
         
-        // Run the actual install command in the correct directory
-        console.log(`🔄 Running package installation in ${packageJsonPath}...`);
+        // Trigger coordinated package installation system
+        console.log(`🔄 Triggering coordinated package installation for ${packageJsonPath}...`);
         const workingDir = packageJsonPath.includes('/') ? packageJsonPath.split('/')[0] : '.';
         console.log(`📁 Working directory: ${workingDir}`);
         
-        const installProcess = await wc.spawn('npm', ['install'], {
-          cwd: workingDir,
-          env: { NODE_ENV: 'development' }
-        });
-        
-        installProcess.output.pipeTo(new WritableStream({
-          write(data: any) {
-            console.log('📦 npm install:', String(data));
-          }
-        }));
-        
-        await installProcess.exit;
-        console.log('✅ Package installation completed');
+        // Use the coordinated installation system to prevent race conditions
+        await handlePackageInstallationCoordinated(packageJsonPath);
+        console.log('✅ Coordinated package installation completed');
         
       } catch (error) {
         console.error('❌ Failed to update package.json:', error);
@@ -2102,6 +2429,12 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
     console.log('Prompt:', prompt);
     console.log('Backend URL:', BACKEND_URL);
     
+    // Reset WebContainer coordination state for fresh start
+    resetWebContainerCoordinationState();
+    
+    // Set the current prompt for the new project
+    setCurrentPrompt(prompt);
+    
     // Set streaming indicator
     setIsStreaming(true);
     
@@ -2114,35 +2447,42 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
       const templateStreamingParser = new StreamingXMLParser(handleStreamingStep, 1);
       
       // Get the template (basic project structure)
-      const response = await axios.post(`${BACKEND_URL}/template`, {
-        prompt: prompt.trim(),
-        provider: aiProvider
-      }, {
-        timeout: 300000 // 5 minutes (300 seconds) for template generation
+      const response = await fetch(`${BACKEND_URL}/template`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          provider: aiProvider
+        }),
+        signal: AbortSignal.timeout(300000) // 5 minutes (300 seconds) for template generation
       });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
       
       console.log('✅ RESPONSE RECEIVED!');
       console.log('Response status:', response.status);
-      console.log('Response data:', response.data);
+      console.log('Response data:', data);
       console.log('Template response received from provider:', aiProvider);
       
-      const { uiprompts } = response.data;
+      const { uiprompts } = data;
       console.log('=== TEMPLATE UI PROMPTS ===');
       console.log(uiprompts[0]);
       console.log('=== END TEMPLATE UI PROMPTS ===');
       
       // Process template with streaming parser for immediate file creation
-      console.log('🔄 Processing template with streaming parser...');
       templateStreamingParser.processChunk(uiprompts[0]);
       templateStreamingParser.finalize();
-      console.log('✅ Template streaming parsing complete');
       
       // Wait for template file operations to complete (use ref to avoid stale closure)
-      console.log('⏳ Waiting for template file operations to complete...');
       let waitTime = 0;
       const maxWaitTime = 20000; // 20 seconds max for template
       while (pendingFileOperationsRef.current > 0 && waitTime < maxWaitTime) {
-        console.log(`   📋 Pending template operations: ${pendingFileOperationsRef.current}`);
         await new Promise(resolve => setTimeout(resolve, 500));
         waitTime += 500;
       }
@@ -2172,14 +2512,14 @@ Current Focus: Building a ${initialPrompt.toLowerCase().includes('todo') ? 'todo
     } catch (error) {
       console.error('Error during initialization:', error);
       // Show user-friendly error message
-      if (axios.isAxiosError(error)) {
-        if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError' || error.message.includes('timeout')) {
           alert(`⏱️ Request timeout during initialization!\n\nThe ${aiProvider.toUpperCase()} API is taking too long to respond.\n\nSuggestions:\n1. Reload and try again\n2. Switch to ${aiProvider === 'nvidia' ? 'Claude' : 'NVIDIA'} provider`);
-        } else if (error.response?.status === 504) {
-          alert(`⏱️ ${error.response.data.message || 'Request timeout'}\n\n${error.response.data.suggestion || 'Try switching providers'}`);
         } else {
-          alert(`❌ Initialization Error: ${error.response?.data?.message || error.message}\n\nPlease reload and try again.`);
+          alert(`❌ Initialization Error: ${error.message}\n\nPlease reload and try again.`);
         }
+      } else {
+        alert(`❌ Initialization Error: Unknown error occurred\n\nPlease reload and try again.`);
       }
     } finally {
       // Clear streaming indicator

@@ -216,14 +216,23 @@ app.post("/chat", async (req, res) => {
     let messages = req.body.messages;
     const provider = req.body.provider || AI_PROVIDER;
     let useStreaming = req.body.stream || false;
-    // Force streaming for NVIDIA
-    if (provider === "nvidia") {
+    
+    // Enable streaming if explicitly requested or if Accept header indicates streaming preference
+    const isStreamingRequest = req.body.stream || 
+                               req.body.realTimeStream || 
+                               req.headers.accept === 'text/plain' ||
+                               req.url.includes('stream');
+    
+    // Force streaming for NVIDIA by default (can be overridden by setting stream: false)
+    if (provider === "nvidia" && req.body.stream !== false) {
         useStreaming = true;
     }
+    
     console.log("[CHAT ENDPOINT CALLED]");
     console.log("Provider:", provider);
-    console.log("Messages:", JSON.stringify(messages, null, 2));
-    console.log("Streaming:", useStreaming);
+    console.log("Messages count:", messages.length);
+    console.log("Streaming requested:", isStreamingRequest);
+    console.log("Use streaming:", useStreaming);
 
     // --- Inject react/node/fullstack base prompt for NVIDIA ---
     if (provider === "nvidia") {
@@ -264,14 +273,67 @@ app.post("/chat", async (req, res) => {
     }
     try {
         if (provider === "claude") {
-            const response = await anthropic.messages.create({
-                messages,
-                model: "claude-sonnet-4-5",
-                max_tokens: 16384, // Increased from 8000 to 16384 tokens for larger projects
-                system: getSystemPrompt(),
-            });
-            const responseText = (response.content[0] as TextBlock)?.text;
-            res.json({ response: responseText });
+            if (isStreamingRequest) {
+                // Claude streaming support
+                res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+                res.setHeader('Transfer-Encoding', 'chunked');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+
+                try {
+                    const stream = await anthropic.messages.create({
+                        messages,
+                        model: "claude-sonnet-4-5",
+                        max_tokens: 16384,
+                        system: getSystemPrompt(),
+                        stream: true
+                    });
+
+                    let hasResponded = false;
+                    for await (const chunk of stream) {
+                        if (res.destroyed) {
+                            console.log('❌ Client disconnected during Claude streaming');
+                            break;
+                        }
+
+                        if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+                            try {
+                                res.write(chunk.delta.text);
+                                hasResponded = true;
+                            } catch (writeError) {
+                                console.error('❌ Error writing Claude chunk:', writeError);
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!res.destroyed) {
+                        res.end();
+                    }
+                    console.log('✅ Claude streaming completed');
+
+                } catch (claudeError) {
+                    console.error('Claude streaming error:', claudeError);
+                    if (!res.destroyed) {
+                        res.status(500).json({ 
+                            error: 'Claude streaming failed', 
+                            message: claudeError instanceof Error ? claudeError.message : 'Unknown Claude streaming error'
+                        });
+                    }
+                }
+            } else {
+                // Non-streaming Claude response
+                const response = await anthropic.messages.create({
+                    messages,
+                    model: "claude-sonnet-4-5",
+                    max_tokens: 16384, // Increased from 8000 to 16384 tokens for larger projects
+                    system: getSystemPrompt(),
+                });
+                const responseText = (response.content[0] as TextBlock)?.text;
+                res.json({ response: responseText });
+            }
         } else {
             const systemPrompt = getSystemPrompt();
             const formattedMessages = [
@@ -282,8 +344,8 @@ app.post("/chat", async (req, res) => {
                 })),
             ];
             try {
-                if (useStreaming && req.body.realTimeStream) {
-                    // Improved real-time streaming response with proper error handling
+                if (isStreamingRequest) {
+                    // Real-time streaming response with proper error handling
                     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
                     res.setHeader('Transfer-Encoding', 'chunked');
                     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -426,6 +488,7 @@ app.post("/chat", async (req, res) => {
         res.status(500).json({ message: "Error processing chat request", error: errorMessage });
     }
 });
+
 // app.post("/chat",async (req,res)=>{
 //     const messages=req.body.messages;
 //     console.log('Chat request received with', messages.length, 'messages');
