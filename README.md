@@ -52,7 +52,7 @@ Transform your ideas into functional web applications through natural language c
    # See AI Provider Options section for detailed setup
    
    # Optional: Add MongoDB URI for project persistence
-   # MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/sitesmith
+   # MONGODB_URI=your_mongodb_connection_string
    ```
 
 4. **Start the application**
