@@ -112,7 +112,7 @@ cd frontend && npm run dev
 
 ### 🎉 Launch
 
-Open your browser and navigate to **`http://localhost:5173`**
+Open your browser and navigate to **`http://localhost:8080`**
 
 That's it! You're ready to build something amazing! 🚀
 
