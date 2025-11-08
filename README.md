@@ -112,9 +112,58 @@ cd frontend && npm run dev
 
 ### 🎉 Launch
 
-Open your browser and navigate to **`http://localhost:8080`**
+- **Frontend**: Open your browser and navigate to **`http://localhost:8080`**
+- **Backend**: Runs on **`http://localhost:5000`**
 
 That's it! You're ready to build something amazing! 🚀
+
+## 🌐 Deployment
+
+### 🚀 Vercel Deployment (Frontend)
+
+SiteSmith is ready for deployment on Vercel! The frontend is already configured with:
+
+- ✅ Environment variables setup (`.env` and `.env.example`)
+- ✅ Vercel configuration (`vercel.json`)  
+- ✅ All API calls use `VITE_BACKEND_URL` environment variable
+- ✅ Proper `.gitignore` configuration
+
+#### Quick Deploy Steps:
+
+1. **Expose Backend** (since you'll run it locally):
+   ```bash
+   # Start your backend first
+   cd backend && npm run dev
+   
+   # In another terminal, expose with ngrok
+   ngrok http 5000
+   ```
+   
+   **⚠️ Note**: You'll get a new ngrok URL each time you restart it (unless using paid plan).
+
+2. **Deploy to Vercel**:
+   - Go to [vercel.com](https://vercel.com) and import your repository
+   - Set **Root Directory** to `frontend`
+   - Add environment variable: `VITE_BACKEND_URL=https://your-ngrok-url.ngrok.io`
+   - Deploy!
+
+3. **Update Backend CORS** (already configured for your URLs):
+   ```javascript
+   // Already added to backend/src/index.ts
+   const allowedOrigins = [
+     'https://sitesmith-three.vercel.app',  // Your Vercel domain
+     'https://your-ngrok-url.ngrok.io',     // Your ngrok URL  
+     'http://localhost:8080',               // Local development
+     'http://localhost:5173'                // Alternative local port
+   ];
+   ```
+
+4. **Each Time You Restart**:
+   - Get new ngrok URL: `ngrok http 5000`
+   - Update `VITE_BACKEND_URL` in Vercel dashboard
+   - Vercel will auto-redeploy
+
+📖 **Detailed Guide**: See `DEPLOYMENT_GUIDE.md` for complete deployment instructions and troubleshooting.
 
 ## 🧠 Smart NLP Features
 
